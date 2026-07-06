@@ -2,7 +2,8 @@
   "name": "whatsapp-payments-bot",
   "version": "1.0.0",
   "private": true,
-  "description": "WhatsApp bot for cross-border payments and invoice settlement (BW/ZA/ZM)",
+  "description": "WhatsApp bot for cross-border payments and invoice settlement (BW/ZA/NA/ZW/ZM)",
+  "main": "index.js",
   "scripts": {
     "dev": "vercel dev"
   },
@@ -13,7 +14,6 @@
     "pdfkit": "^0.15.0"
   },
   "devDependencies": {
-    "dotenv": "^16.4.5",
-    "vercel": "^37.0.0"
+    "dotenv": "^16.4.5"
   }
 }

@@ -1,0 +1,17 @@
+{
+  "functions": {
+    "api/whatsapp.js": {
+      "maxDuration": 30
+    },
+    "api/yellowcard-webhook.js": {
+      "maxDuration": 30,
+      "bodyParser": false
+    },
+    "api/receipt.js": {
+      "maxDuration": 15
+    },
+    "api/admin-kyc-decision.js": {
+      "maxDuration": 10
+    }
+  }
+}

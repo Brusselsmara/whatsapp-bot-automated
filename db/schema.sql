@@ -122,3 +122,12 @@ alter table transactions add column if not exists receipt_sent boolean default f
 create index if not exists idx_transactions_yc_ref on transactions(yellowcard_reference);
 create index if not exists idx_invoices_code on invoices(invoice_code);
 create index if not exists idx_kyc_token on kyc_submissions(approval_token);
+-- Allow 'more_info_requested' as a valid kyc_submissions status
+-- (no constraint to change, status is just text — this comment is a note)
+-- Existing status values: pending | approved | rejected | more_info_requested
+
+-- Index for faster session lookups during resubmission flow
+create index if not exists idx_sessions_phone on sessions(phone);
+
+-- Track how many times a user has resubmitted documents
+alter table kyc_submissions add column if not exists resubmission_count integer default 0;

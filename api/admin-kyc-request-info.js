@@ -122,12 +122,15 @@ module.exports = async (req, res) => {
     const accountType = submission.users?.account_type || 'individual';
     const name        = submission.users?.kyc_name || submission.users?.business_name || phone;
 
-    // Mark submission as 'more_info_requested' so admin knows it's been actioned
+    // Mark submission as 'more_info_requested' so admin knows it's been actioned,
+    // and persist the note so there's a record of what was asked for even after
+    // a new kyc_submissions row is created on resubmission.
     await supabase
       .from('kyc_submissions')
       .update({
         status:     'more_info_requested',
         decided_at: new Date().toISOString(),
+        note:       note || null,
       })
       .eq('id', submission.id);
 
@@ -154,6 +157,7 @@ module.exports = async (req, res) => {
           email:       submission.users?.kyc_email,
           documentUrls: [],
           resubmission: true,
+          previousNote: note || null,
         },
         updated_at: new Date().toISOString(),
       },

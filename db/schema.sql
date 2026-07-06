@@ -131,3 +131,7 @@ create index if not exists idx_sessions_phone on sessions(phone);
 
 -- Track how many times a user has resubmitted documents
 alter table kyc_submissions add column if not exists resubmission_count integer default 0;
+
+-- Persist the admin's note when requesting more info, so there's a
+-- record of what was asked for even after a new submission row is created
+alter table kyc_submissions add column if not exists note text;

@@ -4,8 +4,7 @@
       "maxDuration": 30
     },
     "api/yellowcard-webhook.js": {
-      "maxDuration": 30,
-      "bodyParser": false
+      "maxDuration": 30
     },
     "api/receipt.js": {
       "maxDuration": 15

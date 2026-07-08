@@ -5,11 +5,5 @@
     "api/poll-topups.js": { "maxDuration": 30 },
     "api/receipt.js": { "maxDuration": 15 },
     "api/admin-kyc-decision.js": { "maxDuration": 10 }
-  },
-  "crons": [
-    {
-      "path": "/api/poll-topups",
-      "schedule": "* * * * *"
-    }
-  ]
+  }
 }

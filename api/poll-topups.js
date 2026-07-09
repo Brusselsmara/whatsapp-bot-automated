@@ -156,6 +156,12 @@ async function completeSend(txn, ycData) {
     await supabase.from('transactions').update({ receipt_sent: true }).eq('id', txn.id);
   }
 
+  if (txn.invoice_id) {
+    await supabase.from('invoices')
+      .update({ status: 'paid', paid_at: new Date().toISOString() })
+      .eq('id', txn.invoice_id);
+  }
+
   return 'send_completed';
 }
 

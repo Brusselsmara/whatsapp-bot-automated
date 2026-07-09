@@ -140,7 +140,30 @@ Twilio WhatsApp API  ──►  /api/whatsapp.js   (Vercel function)
 6. Go back and paste the two webhook URLs (step 2.5 and step 3.4 above)
    using your real Vercel URL.
 
-## 5. Test it
+## 5. Set up a cron trigger for `/api/poll-topups`
+
+The bot already settles pending top-ups/sends two ways without any extra setup:
+- **The Yellow Card webhook** (`/api/yellowcard-webhook`) — fires the moment YC's
+  status changes. This is the primary path.
+- **A fire-and-forget check** at the start of every WhatsApp message a user sends
+  (`settlePending` in `lib/conversation.js`) — catches anything the webhook missed,
+  but only for that specific user, and only when they message the bot again.
+
+Neither of those covers the case where a payment finishes and the *webhook delivery
+fails* (network blip, YC retry exhausted, etc.) and the user never sends another
+message. For that, add a third safety net: an external cron service that hits
+`/api/poll-topups` every few minutes for **all** users with pending transactions.
+
+1. Create a free account at something like https://cron-job.org (Vercel Hobby plan
+   cron jobs are limited to once/day, which is too infrequent for payment status —
+   an external service gives you per-minute scheduling for free).
+2. Set it to call, every 2–5 minutes:
+   `https://<your-vercel-app>.vercel.app/api/poll-topups?secret=<your CRON_SECRET>`
+   (or send `X-Cron-Secret: <your CRON_SECRET>` as a header instead of the query param)
+3. Make sure `CRON_SECRET` is set in Vercel's environment variables (see `.env.example`)
+   — without it, the endpoint is unauthenticated and callable by anyone who finds the URL.
+
+## 6. Test it
 
 Message your Twilio WhatsApp sandbox number "hi" — you should get the menu.
 Try creating an invoice (option 1), then from a second phone number, reply
@@ -148,22 +171,31 @@ Try creating an invoice (option 1), then from a second phone number, reply
 
 ## What's intentionally simple in this MVP (next steps for later)
 
-- **KYC collection is basic**: the bot asks for name, DOB, address, ID
-  type/number, and email in plain free-text messages, with no format
-  validation. Yellow Card requires these fields for `customerType: retail`
-  transactions — worth adding real validation (and possibly ID document
-  photo capture via WhatsApp media messages) before scaling up.
-- **Network selection is automatic**: when paying via mobile money or bank,
-  the bot picks the *first* active network Yellow Card returns for that
-  country/channel rather than asking the user to choose their specific
-  provider (e.g. "Airtel" vs "MTN" in Zambia). Fine for a single-network
-  sandbox test; for production you'll want to list options and let the user
-  pick — see `yc.getNetworks()` in `lib/yellowcard.js`.
-- **No retry/idempotency handling** on Yellow Card calls beyond what their
-  API does natively — fine for an MVP, worth hardening before real money
-  moves at volume.
+- **KYC collection has basic format validation** (DOB format, email format,
+  minimum ID number length) but no document verification beyond a manual
+  human review of the uploaded photos/PDFs — that's by design (see the
+  manual-review-by-email flow above), not a gap.
+- **Network selection uses a name-matching heuristic, not a user-facing
+  choice**: when paying via mobile money, the bot prefers a network whose
+  name matches a known provider (MyZaka, Orange, Mascom, BTC) and falls back
+  to the first active network Yellow Card returns. This works for the
+  currently-supported countries (each has at most a couple of networks per
+  channel) but if Yellow Card adds more competing providers per country later,
+  you'll want to list options and let the user pick explicitly — see
+  `yc.getNetworks()` in `lib/yellowcard.js`.
+- **Idempotency and retries are handled** at the wallet-ledger level (every
+  top-up/send is credited or refunded exactly once, guarded by a status
+  check before each wallet update) across all three settlement paths — the
+  webhook, the cron poller, and the fire-and-forget per-message check. Yellow
+  Card API calls themselves aren't retried on transient network failures
+  beyond the built-in request timeout — a dropped request currently surfaces
+  as a failure to the user rather than being retried automatically.
 - **No admin dashboard** — all data lives in Supabase; use the Supabase
   table editor to view/manage invoices and transactions for now.
 - **Static IP for production webhooks/whitelisting**: see the note in the
   Yellow Card setup section above — this needs solving before going live
   on Vercel.
+- **No rate limiting** on `/api/whatsapp` or `/api/poll-topups` beyond Twilio
+  signature verification and the `CRON_SECRET` check — fine at low volume,
+  worth adding (e.g. Vercel's Edge Config or a simple per-phone cooldown) if
+  the bot is ever exposed to abuse/spam traffic.

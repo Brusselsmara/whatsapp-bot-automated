@@ -116,6 +116,12 @@ async function handleSendUpdate(txn, status, event) {
       receiptUrl);
     await supabase.from('transactions').update({ receipt_sent: true }).eq('id', txn.id);
 
+    if (txn.invoice_id) {
+      await supabase.from('invoices')
+        .update({ status: 'paid', paid_at: new Date().toISOString() })
+        .eq('id', txn.invoice_id);
+    }
+
   } else if (status === 'failed') {
     if (txn.status === 'failed') return; // already refunded
 

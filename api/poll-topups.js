@@ -22,7 +22,7 @@ module.exports = async (req, res) => {
     const { data: pending, error } = await supabase
       .from('transactions')
       .select('*')
-      .in('status', ['created', 'pending', 'processing'])
+      .not('status', 'in', '("completed","failed")')
       .in('type', ['topup', 'send', 'invoice_payment'])
       .order('created_at', { ascending: true })
       .limit(50);

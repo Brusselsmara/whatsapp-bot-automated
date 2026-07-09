@@ -40,17 +40,22 @@ module.exports = async (req, res) => {
       return res.status(200).json({ received: true, note: 'ignored' });
     }
 
-    // Look up by YC id first, then by sequenceId as fallback
-    let txn = await findAndUpdateTxn(ycId, status, event);
-    if (!txn) txn = await findAndUpdateTxn(event.sequenceId || '', status, event);
+    // Look up first, handle wallet/receipt side-effects, then update status.
+    // (Updating status before handling caused idempotency checks to skip credits.)
+    let txn = await findTxn(ycId);
+    if (!txn) txn = await findTxn(event.sequenceId || '');
 
     if (!txn) {
       console.warn(`[WEBHOOK] No transaction found for ycId=${ycId}`);
       return res.status(200).json({ received: true, note: 'no matching transaction' });
     }
 
-    if (txn.type === 'topup') await handleTopupUpdate(txn, status);
-    else await handleSendUpdate(txn, status, event);
+    const previousStatus = txn.status;
+
+    if (txn.type === 'topup') await handleTopupUpdate(txn, status, previousStatus);
+    else await handleSendUpdate(txn, status, event, previousStatus);
+
+    await updateTxnStatus(txn.id, status, event);
 
     return res.status(200).json({ received: true });
   } catch (err) {
@@ -59,20 +64,26 @@ module.exports = async (req, res) => {
   }
 };
 
-async function findAndUpdateTxn(ycId, status, event) {
+async function findTxn(ycId) {
   if (!ycId) return null;
   const { data } = await supabase
     .from('transactions')
-    .update({ status, updated_at: new Date().toISOString(), raw_response: event })
+    .select('*')
     .eq('yellowcard_reference', ycId)
-    .select()
-    .single();
+    .maybeSingle();
   return data || null;
 }
 
-async function handleTopupUpdate(txn, status) {
-  // Idempotency: don't double-credit if webhook fires twice
-  if (txn.status === 'completed' && status === 'completed') {
+async function updateTxnStatus(txnId, status, event) {
+  await supabase
+    .from('transactions')
+    .update({ status, updated_at: new Date().toISOString(), raw_response: event })
+    .eq('id', txnId);
+}
+
+async function handleTopupUpdate(txn, status, previousStatus) {
+  // Idempotency: only skip if wallet was already credited on a prior event
+  if (previousStatus === 'completed' && status === 'completed') {
     console.log(`[WEBHOOK] topup ${txn.id} already completed — skipping credit`);
     return;
   }
@@ -103,7 +114,7 @@ async function handleTopupUpdate(txn, status) {
   }
 }
 
-async function handleSendUpdate(txn, status, event) {
+async function handleSendUpdate(txn, status, event, previousStatus) {
   if (status === 'completed') {
     if (txn.receipt_sent) {
       console.log(`[WEBHOOK] send ${txn.id} receipt already sent — skipping`);
@@ -123,7 +134,7 @@ async function handleSendUpdate(txn, status, event) {
     }
 
   } else if (status === 'failed') {
-    if (txn.status === 'failed') return; // already refunded
+    if (previousStatus === 'failed') return; // already refunded
 
     const { data: wallet } = await supabase
       .from('wallets').select('balance')

@@ -4,51 +4,43 @@ const yc = require('../lib/yellowcard');
 
 /**
  * GET /api/poll-topups
- *
- * Vercel cron — runs every minute.
- * Finds all topup transactions still in pending/processing state,
- * polls Yellow Card for their current status, and:
- *   - COMPLETE  → credits wallet, notifies user
- *   - FAILED    → marks failed, notifies user
- *   - otherwise → leaves as-is for next poll
- *
- * Also called by the bot 10 s after momo submission so the user
- * gets fast feedback if YC resolves it quickly (sandbox).
+ * Polls Yellow Card for all unsettled topups and sends across ALL users.
+ * Can be triggered manually or by an external cron service (e.g. cron-job.org).
+ * Protected by CRON_SECRET env var.
  */
 module.exports = async (req, res) => {
-  // Allow Vercel cron (GET) and internal bot calls (POST)
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).send('Method not allowed');
   }
 
-  // Simple shared secret so the endpoint isn't open to the public
   const secret = req.headers['x-cron-secret'] || req.query.secret;
   if (process.env.CRON_SECRET && secret !== process.env.CRON_SECRET) {
     return res.status(401).send('Unauthorized');
   }
 
   try {
-    // Fetch all topups that haven't settled yet
     const { data: pending, error } = await supabase
       .from('transactions')
       .select('*')
-      .eq('type', 'topup')
-      .in('status', ['pending', 'processing'])
+      .in('status', ['created', 'pending', 'processing'])
+      .in('type', ['topup', 'send', 'invoice_payment'])
       .order('created_at', { ascending: true })
       .limit(50);
 
     if (error) {
-      console.error('[POLL] Supabase query error:', error.message);
+      console.error('[POLL] Query error:', error.message);
       return res.status(500).json({ error: error.message });
     }
 
     if (!pending || pending.length === 0) {
-      return res.status(200).json({ polled: 0, message: 'No pending topups' });
+      return res.status(200).json({ polled: 0, message: 'Nothing pending' });
     }
 
-    console.log(`[POLL] Checking ${pending.length} pending topup(s)...`);
+    console.log(`[POLL] Checking ${pending.length} transaction(s)`);
 
-    const results = await Promise.allSettled(pending.map((txn) => pollOne(txn)));
+    const results = await Promise.allSettled(
+      pending.map((txn) => pollOne(txn))
+    );
 
     const summary = results.map((r, i) => ({
       id: pending[i].id,
@@ -56,7 +48,7 @@ module.exports = async (req, res) => {
       result: r.status === 'fulfilled' ? r.value : `error: ${r.reason?.message}`,
     }));
 
-    console.log('[POLL] Results:', JSON.stringify(summary));
+    console.log('[POLL] Done:', JSON.stringify(summary));
     return res.status(200).json({ polled: pending.length, summary });
   } catch (err) {
     console.error('[POLL] Unexpected error:', err);
@@ -70,77 +62,128 @@ async function pollOne(txn) {
 
   let ycData;
   try {
-    ycData = await yc.getReceive(ref);
+    ycData = txn.type === 'topup'
+      ? await yc.getReceive(ref)
+      : await yc.getSend(ref);
   } catch (err) {
-    console.error(`[POLL] getReceive(${ref}) failed:`, err.message);
+    console.error(`[POLL] Fetch failed for ${txn.id}:`, err.message);
     return `fetch_error: ${err.message}`;
   }
 
-  console.log(`[POLL] txn=${txn.id} ref=${ref} ycStatus=${ycData?.status}`);
-
   const ycStatus = (ycData?.status || '').toUpperCase();
+  console.log(`[POLL] txn=${txn.id} type=${txn.type} ycStatus=${ycStatus}`);
 
-  if (ycStatus === 'COMPLETE' || ycStatus === 'COMPLETED') {
-    return creditWallet(txn, ycData);
+  const COMPLETE = ['COMPLETE', 'COMPLETED', 'SUCCESS'];
+  const FAILED = ['FAILED', 'EXPIRED', 'CANCELLED'];
+
+  if (COMPLETE.includes(ycStatus)) {
+    return txn.type === 'topup'
+      ? creditWallet(txn, ycData)
+      : completeSend(txn, ycData);
   }
 
-  if (ycStatus === 'FAILED' || ycStatus === 'EXPIRED' || ycStatus === 'CANCELLED') {
-    await supabase
-      .from('transactions')
-      .update({ status: 'failed', updated_at: new Date().toISOString(), raw_response: ycData })
-      .eq('id', txn.id);
-
-    await sendWhatsApp(
-      txn.phone,
-      `⚠️ Your top-up of ${txn.amount} ${txn.currency} could not be completed (${ycStatus.toLowerCase()}). Please reply *menu* to try again.`,
-    );
-    return `failed: ${ycStatus}`;
+  if (FAILED.includes(ycStatus)) {
+    return txn.type === 'topup'
+      ? failTopup(txn, ycData, ycStatus)
+      : failSend(txn, ycData);
   }
 
-  // Still pending/processing — nothing to do yet
   return `still_${ycStatus.toLowerCase() || 'pending'}`;
 }
 
 async function creditWallet(txn, ycData) {
-  // Idempotency guard — don't double-credit if cron runs twice quickly
+  // Idempotency guard
   const { data: fresh } = await supabase
-    .from('transactions')
-    .select('status')
-    .eq('id', txn.id)
-    .single();
+    .from('transactions').select('status').eq('id', txn.id).single();
+  if (fresh?.status === 'completed') return 'already_completed';
 
-  if (fresh?.status === 'completed') {
-    console.log(`[POLL] txn=${txn.id} already completed — skipping credit`);
-    return 'already_completed';
-  }
-
-  // Mark transaction completed
-  await supabase
-    .from('transactions')
+  await supabase.from('transactions')
     .update({ status: 'completed', updated_at: new Date().toISOString(), raw_response: ycData })
     .eq('id', txn.id);
 
-  // Credit wallet with optimistic upsert
   const { data: wallet } = await supabase
-    .from('wallets')
-    .select('balance')
-    .eq('phone', txn.phone)
-    .eq('currency', txn.currency)
-    .single();
+    .from('wallets').select('balance')
+    .eq('phone', txn.phone).eq('currency', txn.currency).single();
 
   const prev = parseFloat(wallet?.balance ?? 0);
-  const next = prev + parseFloat(txn.amount);
+  const next = parseFloat((prev + parseFloat(txn.amount)).toFixed(2));
 
-  await supabase
-    .from('wallets')
-    .upsert({ phone: txn.phone, currency: txn.currency, balance: next, updated_at: new Date().toISOString() });
-
-  console.log(`[POLL] ✅ Credited ${txn.amount} ${txn.currency} to ${txn.phone} — new balance: ${next}`);
-
-  await sendWhatsApp(
-    txn.phone,
-    `✅ Top-up confirmed! *${txn.amount} ${txn.currency}* has been added to your wallet.\n\nNew balance: *${next} ${txn.currency}*\n\nReply *menu* to continue.`,
+  const { error } = await supabase.from('wallets').upsert(
+    { phone: txn.phone, currency: txn.currency, balance: next, updated_at: new Date().toISOString() },
+    { onConflict: 'phone,currency' }
   );
+  if (error) {
+    console.error(`[POLL] Wallet upsert failed for ${txn.id}:`, error.message, error.details);
+    return `upsert_failed: ${error.message}`;
+  }
 
-  return `credited: ${prev} → ${next} ${txn.currency}`;
+  console.log(`[POLL] ✅ Credited ${txn.amount} ${txn.currency} — ${prev} → ${next}`);
+  await sendWhatsApp(txn.phone,
+    `✅ Top-up confirmed!\n\n*${txn.amount} ${txn.currency}* added to your wallet.\nNew balance: *${next} ${txn.currency}*\n\nReply *menu* to continue.`);
+
+  return `credited: ${prev} → ${next}`;
+}
+
+async function failTopup(txn, ycData, ycStatus) {
+  const { data: fresh } = await supabase
+    .from('transactions').select('status').eq('id', txn.id).single();
+  if (fresh?.status === 'failed') return 'already_failed';
+
+  await supabase.from('transactions')
+    .update({ status: 'failed', updated_at: new Date().toISOString(), raw_response: ycData })
+    .eq('id', txn.id);
+
+  await sendWhatsApp(txn.phone,
+    `⚠️ Your top-up of *${txn.amount} ${txn.currency}* could not be completed. Please reply *menu* to try again.`);
+  return `failed: ${ycStatus}`;
+}
+
+async function completeSend(txn, ycData) {
+  const { data: fresh } = await supabase
+    .from('transactions').select('status, receipt_sent').eq('id', txn.id).single();
+  if (fresh?.status === 'completed') return 'already_completed';
+
+  await supabase.from('transactions')
+    .update({ status: 'completed', updated_at: new Date().toISOString(), raw_response: ycData })
+    .eq('id', txn.id);
+
+  if (!fresh?.receipt_sent) {
+    const receiptUrl = `${process.env.PUBLIC_APP_URL}/api/receipt?id=${txn.id}`;
+    const label = txn.type === 'invoice_payment' ? 'Invoice payment' : 'Transfer';
+    await sendWhatsApp(txn.phone,
+      `✅ *${label} confirmed!*\n\n*${txn.amount} ${txn.currency}* sent to *${txn.recipient_name}*.\n\nYour receipt is attached.`,
+      receiptUrl);
+    await supabase.from('transactions').update({ receipt_sent: true }).eq('id', txn.id);
+  }
+
+  return 'send_completed';
+}
+
+async function failSend(txn, ycData) {
+  const { data: fresh } = await supabase
+    .from('transactions').select('status').eq('id', txn.id).single();
+  if (fresh?.status === 'failed') return 'already_failed';
+
+  await supabase.from('transactions')
+    .update({ status: 'failed', updated_at: new Date().toISOString(), raw_response: ycData })
+    .eq('id', txn.id);
+
+  // Refund
+  const { data: wallet } = await supabase
+    .from('wallets').select('balance')
+    .eq('phone', txn.phone).eq('currency', txn.currency).single();
+  const prev = parseFloat(wallet?.balance ?? 0);
+  const refunded = parseFloat((prev + parseFloat(txn.amount)).toFixed(2));
+
+  const { error } = await supabase.from('wallets').upsert(
+    { phone: txn.phone, currency: txn.currency, balance: refunded, updated_at: new Date().toISOString() },
+    { onConflict: 'phone,currency' }
+  );
+  if (error) console.error(`[POLL] Refund upsert failed for ${txn.id}:`, error.message);
+  else {
+    console.log(`[POLL] ↩️ Refunded ${txn.amount} ${txn.currency} — ${prev} → ${refunded}`);
+    await sendWhatsApp(txn.phone,
+      `⚠️ Your transfer of *${txn.amount} ${txn.currency}* to ${txn.recipient_name} failed. Your balance has been refunded.`);
+  }
+  return 'send_failed_refunded';
 }

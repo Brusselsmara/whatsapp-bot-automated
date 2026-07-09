@@ -2,12 +2,7 @@ const { supabase } = require('../lib/db');
 const { sendWhatsApp } = require('../lib/twilio');
 const { verifyWebhookSignature } = require('../lib/yellowcard');
 
-// Paste this URL into Yellow Card's webhook registration (see scripts/register-webhook.js):
-//   https://<your-vercel-app>.vercel.app/api/yellowcard-webhook
-
-module.exports.config = {
-  api: { bodyParser: false }, // need the raw body to verify X-YC-Signature
-};
+module.exports.config = { api: { bodyParser: false } };
 
 function readRawBody(req) {
   return new Promise((resolve, reject) => {
@@ -25,107 +20,132 @@ module.exports = async (req, res) => {
   const signature = req.headers['x-yc-signature'];
 
   if (process.env.NODE_ENV === 'production' && !verifyWebhookSignature(rawBody, signature)) {
-    console.error('Yellow Card webhook signature mismatch — rejecting.');
+    console.error('[WEBHOOK] Signature mismatch — rejecting');
     return res.status(403).send('Invalid signature');
   }
 
   let event;
-  try {
-    event = JSON.parse(rawBody);
-  } catch (e) {
-    return res.status(400).send('Invalid JSON');
-  }
+  try { event = JSON.parse(rawBody); }
+  catch { return res.status(400).send('Invalid JSON'); }
+
+  console.log('[WEBHOOK] Received:', JSON.stringify(event));
 
   try {
     const status = mapStatus(event.event);
-    const ycId = event.id;
+    const ycId = event.id || event.data?.id;
+    console.log(`[WEBHOOK] event=${event.event} status=${status} ycId=${ycId}`);
+
     if (!ycId || !status) {
-      return res.status(200).json({ received: true, note: 'Unrecognized event, ignored' });
+      console.warn('[WEBHOOK] Unrecognized or missing id — ignoring');
+      return res.status(200).json({ received: true, note: 'ignored' });
     }
 
-    const { data: txn } = await supabase
-      .from('transactions')
-      .update({ status, updated_at: new Date().toISOString(), raw_response: event })
-      .eq('yellowcard_reference', ycId)
-      .select()
-      .single();
+    // Look up by YC id first, then by sequenceId as fallback
+    let txn = await findAndUpdateTxn(ycId, status, event);
+    if (!txn) txn = await findAndUpdateTxn(event.sequenceId || '', status, event);
 
-    if (!txn) return res.status(200).json({ received: true, note: 'No matching transaction' });
-
-    if (txn.type === 'topup') {
-      await handleTopupUpdate(txn, status);
-    } else {
-      // 'send' or 'invoice_payment'
-      await handleSendUpdate(txn, status, event);
+    if (!txn) {
+      console.warn(`[WEBHOOK] No transaction found for ycId=${ycId}`);
+      return res.status(200).json({ received: true, note: 'no matching transaction' });
     }
+
+    if (txn.type === 'topup') await handleTopupUpdate(txn, status);
+    else await handleSendUpdate(txn, status, event);
 
     return res.status(200).json({ received: true });
   } catch (err) {
-    console.error('Error processing Yellow Card webhook:', err);
-    return res.status(200).json({ received: true, error: 'internal error logged' });
+    console.error('[WEBHOOK] Error:', err);
+    return res.status(200).json({ received: true, error: 'logged' });
   }
 };
 
+async function findAndUpdateTxn(ycId, status, event) {
+  if (!ycId) return null;
+  const { data } = await supabase
+    .from('transactions')
+    .update({ status, updated_at: new Date().toISOString(), raw_response: event })
+    .eq('yellowcard_reference', ycId)
+    .select()
+    .single();
+  return data || null;
+}
+
 async function handleTopupUpdate(txn, status) {
+  // Idempotency: don't double-credit if webhook fires twice
+  if (txn.status === 'completed' && status === 'completed') {
+    console.log(`[WEBHOOK] topup ${txn.id} already completed — skipping credit`);
+    return;
+  }
+
   if (status === 'completed') {
     const { data: wallet } = await supabase
-      .from('wallets')
-      .select('*')
-      .eq('phone', txn.phone)
-      .eq('currency', txn.currency)
-      .single();
+      .from('wallets').select('balance')
+      .eq('phone', txn.phone).eq('currency', txn.currency).single();
 
-    const newBalance = (wallet ? parseFloat(wallet.balance) : 0) + parseFloat(txn.amount);
-    await supabase
-      .from('wallets')
-      .upsert({ phone: txn.phone, currency: txn.currency, balance: newBalance, updated_at: new Date().toISOString() });
+    const prev = parseFloat(wallet?.balance ?? 0);
+    const next = parseFloat((prev + parseFloat(txn.amount)).toFixed(2));
 
-    await sendWhatsApp(
-      txn.phone,
-      `💰 Your top-up of ${txn.amount} ${txn.currency} is confirmed. New balance: ${newBalance} ${txn.currency}.`
+    const { error } = await supabase.from('wallets').upsert(
+      { phone: txn.phone, currency: txn.currency, balance: next, updated_at: new Date().toISOString() },
+      { onConflict: 'phone,currency' }
     );
+    if (error) {
+      console.error(`[WEBHOOK] Wallet upsert failed for topup ${txn.id}:`, error.message);
+      return;
+    }
+    console.log(`[WEBHOOK] ✅ Topup credited ${txn.amount} ${txn.currency} — ${prev} → ${next}`);
+    await sendWhatsApp(txn.phone,
+      `✅ Top-up of *${txn.amount} ${txn.currency}* confirmed!\n\nNew balance: *${next} ${txn.currency}*`);
+
   } else if (status === 'failed') {
-    await sendWhatsApp(txn.phone, `⚠️ Your top-up of ${txn.amount} ${txn.currency} failed. Please reply "menu" to try again.`);
+    await sendWhatsApp(txn.phone,
+      `⚠️ Your top-up of *${txn.amount} ${txn.currency}* failed. Please reply *menu* to try again.`);
   }
 }
 
 async function handleSendUpdate(txn, status, event) {
   if (status === 'completed') {
+    if (txn.receipt_sent) {
+      console.log(`[WEBHOOK] send ${txn.id} receipt already sent — skipping`);
+      return;
+    }
     const receiptUrl = `${process.env.PUBLIC_APP_URL}/api/receipt?id=${txn.id}`;
     const label = txn.type === 'invoice_payment' ? 'Invoice payment' : 'Transfer';
-
-    await sendWhatsApp(
-      txn.phone,
-      `✅ ${label} of ${txn.amount} ${txn.currency} to ${txn.recipient_name} is confirmed. Your remittance receipt is attached.`,
-      receiptUrl
-    );
+    await sendWhatsApp(txn.phone,
+      `✅ *${label} confirmed!*\n\n*${txn.amount} ${txn.currency}* sent to *${txn.recipient_name}*.\n\nYour receipt is attached.`,
+      receiptUrl);
     await supabase.from('transactions').update({ receipt_sent: true }).eq('id', txn.id);
+
   } else if (status === 'failed') {
-    // Refund the wallet since we debited it up front when the send was submitted.
+    if (txn.status === 'failed') return; // already refunded
+
     const { data: wallet } = await supabase
-      .from('wallets')
-      .select('*')
-      .eq('phone', txn.phone)
-      .eq('currency', txn.currency)
-      .single();
+      .from('wallets').select('balance')
+      .eq('phone', txn.phone).eq('currency', txn.currency).single();
 
-    const refunded = (wallet ? parseFloat(wallet.balance) : 0) + parseFloat(txn.amount);
-    await supabase
-      .from('wallets')
-      .upsert({ phone: txn.phone, currency: txn.currency, balance: refunded, updated_at: new Date().toISOString() });
+    const prev = parseFloat(wallet?.balance ?? 0);
+    const refunded = parseFloat((prev + parseFloat(txn.amount)).toFixed(2));
 
-    await sendWhatsApp(
-      txn.phone,
-      `⚠️ Your payment of ${txn.amount} ${txn.currency} to ${txn.recipient_name} failed${event.errorCode ? ` (${event.errorCode})` : ''}. Your balance has been refunded.`
+    const { error } = await supabase.from('wallets').upsert(
+      { phone: txn.phone, currency: txn.currency, balance: refunded, updated_at: new Date().toISOString() },
+      { onConflict: 'phone,currency' }
     );
+    if (error) {
+      console.error(`[WEBHOOK] Wallet refund failed for send ${txn.id}:`, error.message);
+      return;
+    }
+    console.log(`[WEBHOOK] ↩️ Refunded ${txn.amount} ${txn.currency} — ${prev} → ${refunded}`);
+    await sendWhatsApp(txn.phone,
+      `⚠️ Your transfer of *${txn.amount} ${txn.currency}* to ${txn.recipient_name} failed. Your balance has been refunded.`);
   }
 }
 
 function mapStatus(eventName) {
   if (!eventName) return null;
-  if (eventName.endsWith('.COMPLETE') || eventName.endsWith('.COMPLETED')) return 'completed';
-  if (eventName.endsWith('.PROCESSING')) return 'processing';
-  if (eventName.endsWith('.FAILED') || eventName.endsWith('.EXPIRED')) return 'failed';
-  if (eventName.endsWith('.PENDING')) return 'pending';
+  const e = eventName.toUpperCase();
+  if (e.endsWith('.COMPLETE') || e.endsWith('.COMPLETED') || e.endsWith('.SUCCESS')) return 'completed';
+  if (e.endsWith('.PROCESSING')) return 'processing';
+  if (e.endsWith('.FAILED') || e.endsWith('.EXPIRED') || e.endsWith('.CANCELLED')) return 'failed';
+  if (e.endsWith('.PENDING') || e.endsWith('.CREATED')) return 'pending';
   return null;
 }

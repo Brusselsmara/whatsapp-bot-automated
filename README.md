@@ -1,201 +1,501 @@
-# WhatsApp Cross-Border Payments Bot
+# PayLink — WhatsApp Cross-Border Payments Bot
 
-## 🔄 Major update: wallet-based model with manual KYC approval
+PayLink is a WhatsApp bot that lets individuals and businesses register, verify their identity, fund an internal wallet, and send money or pay invoices to bank accounts and mobile money wallets across **Botswana (BWP)**, **South Africa (ZAR)**, and **Zambia (ZMW)**.
 
-This bot now works differently from earlier versions:
-
-1. **New users register first** — individual or business, KYC/KYB details, and document uploads (sent as WhatsApp photos/PDFs).
-2. **You review manually by email** — every registration sends you an email (via Resend) with the documents attached and **Approve / Reject** buttons. No dashboard needed, no email-reply-parsing — just click a button.
-3. **Approved users get an internal wallet** (one balance per currency: BWP, ZAR, ZMW) instead of paying per-transaction.
-4. **Top-up Balance** funds the wallet via bank transfer or mobile money (same Yellow Card receive flow as before).
-5. **Pay Invoice** / **Send money** debit the wallet and push funds out to a supplier or recipient's bank/mobile money account via Yellow Card's send API.
-6. **PDF remittance receipts** are generated on the fly and sent back as a WhatsApp document once a payment completes.
-
-Run `db/schema.sql` again in Supabase's SQL editor even if you ran the old version — it's safe to re-run (uses `if not exists` throughout) and adds the new tables/columns.
-
-### New environment variables needed
-- `RESEND_API_KEY` — from https://resend.com/api-keys (free tier is enough)
-- `RESEND_FROM_EMAIL` — while testing, `PayLink <onboarding@resend.dev>` works with no domain setup
-- `ADMIN_EMAIL` — your own email, where KYC review emails get sent
-
-### A known limitation worth knowing about
-Debit/credit card top-up isn't available through Yellow Card's direct API — only bank transfer and mobile money have a `channelType` in their API. Card payments exist only through Yellow Card's separate hosted checkout widget (a link you'd open in a browser, not a raw API call). Top-up currently supports bank + mobile money only; card support would need a second, different integration if you want it.
+Built with **Twilio WhatsApp** + **Node.js on Vercel** + **Supabase Postgres** + **Yellow Card** (fiat settlement).
 
 ---
 
+## What the bot does
 
-MVP: WhatsApp bot (Twilio) + Node.js (Vercel serverless) + Supabase Postgres +
-Yellow Card (stablecoin-to-fiat settlement).
+| Capability | Individuals | Businesses |
+|------------|:-----------:|:----------:|
+| Register (KYC/KYB) with document upload | ✅ | ✅ |
+| Manual admin approval via email | ✅ | ✅ |
+| Internal multi-currency wallet (BWP, ZAR, ZMW) | ✅ | ✅ |
+| Top-up via **bank transfer** | BW, ZA | BW, ZA |
+| Top-up via **mobile money** | BW, ZM | BW, ZM |
+| Send money to bank or mobile wallet | ✅ | ✅ |
+| Pay supplier invoice | — | ✅ |
+| Create invoice (share code with customer) | — | ✅ |
+| Check balance | ✅ | ✅ |
+| Transaction history (last 5) | ✅ | ✅ |
+| Status lookup (reference / invoice code) | — | ✅ |
+| PDF remittance receipt on completed sends | ✅ | ✅ |
 
-Covers both:
-- **B2B**: create an invoice, share a code, get paid, get notified.
-- **B2C**: pay an invoice, or send money directly to someone's WhatsApp number.
+---
 
-## ⚠️ Important: country coverage
-
-I checked Yellow Card's current coverage page. Of your 5 target countries, only
-**3 are currently supported**:
-
-| Country      | Currency | Receive (get paid) | Send (payout) |
-|--------------|----------|---------------------|----------------|
-| Botswana     | BWP      | Bank + Mobile Money (MyZaka) | Bank + Mobile Money (MyZaka) |
-| South Africa | ZAR      | Bank only | Bank only |
-| Zambia       | ZMW      | Mobile Money only (Airtel/MTN/TNM) | Mobile Money only |
-| **Namibia**  | NAD      | ❌ not yet supported | ❌ not yet supported |
-| **Zimbabwe** | ZWL      | ❌ not yet supported | ❌ not yet supported |
-
-This bot is built for Botswana, South Africa, and Zambia. Namibia and Zimbabwe
-are deliberately left out of `CURRENCY_TO_COUNTRY` in `lib/conversation.js` and
-`COUNTRY_CONFIG` in `lib/yellowcard.js` — add them there the day Yellow Card's
-[coverage page](https://docs.yellowcard.engineering/docs/africa) lists them.
-You may want to ask Yellow Card directly about their roadmap for those two
-markets, or look at a secondary provider for them in the meantime.
-
-## How it fits together
+## Architecture
 
 ```
-Customer's WhatsApp
+Customer WhatsApp
       │
       ▼
-Twilio WhatsApp API  ──►  /api/whatsapp.js   (Vercel function)
+Twilio WhatsApp API  ──►  /api/whatsapp.js
                                 │
                                 ▼
-                        lib/conversation.js  (menu / state machine)
+                        lib/conversation.js   (state machine / menus)
                                 │
-                    ┌───────────┴───────────┐
-                    ▼                       ▼
-              Supabase DB            Yellow Card API
-        (users, invoices,           (quotes, collections,
-         transactions, sessions)      payouts)
-                                            │
-                                            ▼
-                              /api/yellowcard-webhook.js
-                              (payment confirmed/failed)
-                                            │
-                                            ▼
-                              Twilio sends WhatsApp update
-                                    back to both parties
+              ┌─────────────────┼─────────────────┐
+              ▼                 ▼                 ▼
+         Supabase DB      Yellow Card API    Resend (KYC email)
+    users · wallets ·     receive (top-up)         │
+    sessions · txns ·     send (payout)            ▼
+    invoices · kyc         webhooks          /api/admin-kyc-*
+              │                 │
+              │                 ▼
+              │     /api/yellowcard-webhook.js
+              │                 │
+              └────────► Twilio WhatsApp reply + PDF receipt
 ```
 
-## 1. Set up Supabase
+### API endpoints
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /api/whatsapp` | Incoming Twilio messages (text + media) |
+| `POST /api/yellowcard-webhook` | Yellow Card payment status events |
+| `GET /api/poll-topups` | Cron poller for all pending transactions |
+| `GET /api/receipt?id=` | PDF remittance receipt (completed sends only) |
+| `GET /api/admin-kyc-decision` | Approve or reject registration (email link) |
+| `GET/POST /api/admin-kyc-request-info` | Request more KYC documents (email link) |
+
+---
+
+## Two balances (important)
+
+The bot uses **two separate balances**. They are not the same thing.
+
+| Balance | Where | What it is |
+|---------|-------|------------|
+| **User wallet** | Supabase `wallets` table | What the customer sees in WhatsApp. Debited on send; credited on top-up. |
+| **YC Treasury** | Yellow Card dashboard | Stablecoin balance (USD) that Yellow Card uses to settle fiat payouts. |
+
+- **Top-up (menu)** → calls Yellow Card **receive** API → credits the **user wallet** when payment completes.
+- **Send / Pay invoice** → debits the **user wallet** → calls Yellow Card **send** API → YC pays out from **Treasury**.
+
+You must fund the YC Treasury separately (stablecoin deposit in the Treasury Portal). See [YC Balance Top up docs](https://docs.yellowcard.engineering/docs/settlement-api.md).
+
+---
+
+## Country & channel coverage
+
+Yellow Card currently supports these corridors for this bot:
+
+| Country | Currency | Top-up bank | Top-up momo | Send bank | Send momo |
+|---------|----------|:-----------:|:-----------:|:---------:|:---------:|
+| Botswana | BWP | ✅ | ✅ (MyZaka, etc.) | ✅ | ✅ |
+| South Africa | ZAR | ✅ | ❌ | ✅ | ❌ |
+| Zambia | ZMW | ❌ | ✅ | ❌ | ✅ |
+
+**Not supported yet:** Namibia (NAD), Zimbabwe (ZWL) — excluded until Yellow Card lists them on their [Africa coverage page](https://docs.yellowcard.engineering/docs/africa).
+
+**Transaction limits:** minimum **10**, maximum **100,000** (local currency units) per transaction.
+
+**Card top-up:** not available via Yellow Card’s direct API. Only bank and mobile money are supported.
+
+---
+
+## Menus
+
+### Welcome (unregistered / rejected users)
+
+```
+Welcome to PayLink 👋
+1️⃣ Register
+2️⃣ Help
+```
+
+### Individual menu (after KYC approval)
+
+```
+1️⃣ Send money to bank or mobile wallet
+2️⃣ Top-up Balance
+3️⃣ Check Balance
+4️⃣ Transaction History
+```
+
+### Business menu (after KYC approval)
+
+```
+1️⃣ Pay Invoice (pay a supplier)
+2️⃣ Send money to bank or mobile wallet
+3️⃣ Top-up Balance
+4️⃣ Check Balance
+5️⃣ Check invoice / transaction status
+6️⃣ Transaction History
+7️⃣ Create Invoice
+```
+
+Reply **hi**, **hello**, **menu**, or **start** anytime to return to the main menu.
+
+---
+
+## Workflow 1 — Customer registration (Individual & Business)
+
+Both account types follow the same steps after choosing account type. Businesses collect one extra field (business name) and require more documents.
+
+```mermaid
+flowchart TD
+    A[User messages bot] --> B{KYC status?}
+    B -->|unregistered / rejected| C[Welcome: 1 Register]
+    B -->|pending_review| D[Wait message — under review]
+    B -->|approved| E[Main menu]
+
+    C --> F[Individual or Business?]
+    F -->|business| G[Business name]
+    G --> H[Owner / rep full name]
+    F -->|individual| H
+    H --> I[Date of birth dd/mm/yyyy]
+    I --> J[Address]
+    J --> K[ID type + number]
+    K --> L[Email]
+    L --> M[Document checklist shown]
+    M --> N[User sends photos/PDFs via WhatsApp]
+    N --> O{Reply done?}
+    O -->|more docs| N
+    O -->|done| P[Save to DB · email admin]
+    P --> Q[User: under review 1 business day]
+```
+
+### Individual — documents required
+
+1. Government-issued photo ID (National ID, Passport, or Driver's Licence)
+2. Proof of address (utility bill or bank statement, within 3 months)
+3. Selfie holding the ID document
+
+### Business — documents required (KYB)
+
+1. Certificate of Incorporation / Business Registration
+2. Company tax registration certificate
+3. Proof of business address (within 3 months)
+4. Government-issued photo ID of authorised representative
+5. Proof of address of authorised representative (within 3 months)
+6. Selfie of representative holding their ID
+7. Latest audited financial statements or management accounts (if available)
+
+### What happens after submission
+
+1. User record saved with `kyc_status = pending_review`
+2. Documents stored in `kyc_submissions` (Twilio media URLs)
+3. Admin receives email (Resend) with attachments and three actions:
+   - **Approve** → `kyc_status = approved`, wallets created (BWP, ZAR, ZMW at 0), WhatsApp welcome message
+   - **Reject** → `kyc_status = rejected`, user notified
+   - **Request More Info** → admin adds optional note, user gets WhatsApp checklist to resubmit
+
+Until approved, only the welcome screen and help text are available — no payments.
+
+---
+
+## Workflow 2 — Top-up balance (fund user wallet)
+
+Top-up uses Yellow Card’s **receive** API. When YC confirms payment, the user’s **internal wallet** is credited.
+
+### Top-up — Botswana (BWP) — bank or momo
+
+```mermaid
+flowchart TD
+    A[Menu: Top-up Balance] --> B[Currency: BWP]
+    B --> C{Channel}
+    C -->|1 Bank| D[Enter amount]
+    C -->|2 Mobile money| D
+    D --> E{Channel?}
+    E -->|Bank| F[Confirm screen]
+    F --> G[YC receive · bank details returned]
+    G --> H[User transfers to YC bank account]
+    H --> I[YC confirms · wallet credited]
+    E -->|Momo| J[Enter momo number paying from]
+    J --> K[YC receive · USSD prompt on phone]
+    K --> L[User approves USSD]
+    L --> I
+```
+
+### Top-up — South Africa (ZAR) — bank only
+
+1. Choose **ZAR** (bank is the only channel — no choice step)
+2. Enter amount → **confirm**
+3. Bot returns Yellow Card bank details + payment reference (`receive.id`)
+4. User makes bank transfer with that reference
+5. Wallet credited when YC marks receive complete
+
+### Top-up — Zambia (ZMW) — mobile money only
+
+1. Choose **ZMW** (momo is the only channel)
+2. Enter amount
+3. Enter mobile money number (normalised to `+260…`)
+4. USSD prompt sent to that number — user must approve
+5. Wallet credited on completion
+
+### Top-up settlement paths
+
+The wallet is credited through any of these (idempotent — only once):
+
+1. **Yellow Card webhook** (`RECEIVE.COMPLETE`) — primary
+2. **Per-message poll** — `settlePending()` runs at the start of every incoming message
+3. **Cron poller** — `GET /api/poll-topups?secret=…` every 2–5 minutes
+4. **Immediate poll** — right after `submitReceive` returns
+
+User receives WhatsApp: `✅ Top-up of X CURRENCY confirmed! New balance: Y`
+
+---
+
+## Workflow 3 — Send money (Individual & Business)
+
+Send money debits the user wallet and pays out to a recipient via Yellow Card **send** API.
+
+```mermaid
+flowchart TD
+    A[Menu: Send money] --> B[Recipient name]
+    B --> C{Channel}
+    C -->|1 Bank| D[Bank account number]
+    C -->|2 Momo| E[Mobile money number]
+    D --> F[Currency BWP / ZAR / ZMW]
+    E --> F
+    F --> G[Validate channel for country]
+    G --> H[Amount]
+    H --> I{Sufficient balance?}
+    I -->|no| J[Prompt to top up]
+    I -->|yes| K[Debit wallet]
+    K --> L[YC submitSend full KYC + customerUID]
+    L --> M[acceptSend fallback if needed]
+    M --> N[Transaction pending in DB]
+    N --> O{YC completes?}
+    O -->|yes| P[PDF receipt via WhatsApp]
+    O -->|failed| Q[Wallet refunded]
+```
+
+### Step-by-step (send money)
+
+| Step | User input | Bot action |
+|------|------------|------------|
+| 1 | Recipient name | Saves to session |
+| 2 | `1` bank or `2` momo | Sets `channelType` |
+| 3 | Account / momo number | Momo normalised to E.164 later |
+| 4 | Currency (`BWP`, `ZAR`, `ZMW`) | Validates channel allowed for country |
+| 5 | Amount | Checks wallet balance ≥ amount |
+| 6 | — | Debits wallet, calls `submitSend` |
+| 7 | — | User told payout is processing; receipt follows |
+
+### Yellow Card payload (sends)
+
+For BWP / ZAR / ZMW, **full sender KYC** is always sent (Tier 0 reduced KYC does not apply):
+
+- `name`, `country`, `phone`, `address`, `dob`, `email`, `idNumber`, `idType`
+- `customerUID` (user’s phone digits)
+- `reason`: `other` (send) or `bills` (invoice payment)
+- `destination.country`, `networkId` (auto-selected from active YC networks)
+- `forceAccept: true` + `acceptSend` fallback if still `created`/`pending`
+
+### Send settlement & receipt
+
+When Yellow Card marks the send **complete**:
+
+1. Transaction status → `completed`
+2. PDF receipt generated at `/api/receipt?id=<txn_uuid>`
+3. WhatsApp message + PDF attachment sent to payer
+4. `receipt_sent` flag set (prevents duplicates)
+
+If send **fails** → wallet amount refunded, user notified.
+
+---
+
+## Workflow 4 — Pay invoice (Business only)
+
+Two ways to pay a supplier:
+
+### A) Pay by invoice code
+
+```mermaid
+flowchart TD
+    A[Menu: Pay Invoice] --> B[Enter invoice code e.g. INV-ABC123]
+    B --> C[Load invoice amount + currency]
+    C --> D{Channel for country}
+    D -->|BW both| E[1 Bank or 2 Momo]
+    D -->|ZA bank only| F[Bank account number]
+    D -->|ZM momo only| G[Momo number]
+    E --> H[Supplier account number]
+    F --> H
+    G --> H
+    H --> I[Reply confirm]
+    I --> J[Optional payment reference]
+    J --> K[Same send flow as Workflow 3]
+    K --> L[Invoice marked paid on completion]
+```
+
+### B) Manual entry (skip invoice code)
+
+1. Pay Invoice → reply **skip**
+2. Enter supplier name → channel → account → currency → amount → reference
+3. Same payout flow as send money (`type = invoice_payment`)
+
+---
+
+## Workflow 5 — Create invoice (Business only)
+
+| Step | Input |
+|------|-------|
+| 1 | Currency (`BWP`, `ZAR`, `ZMW`) |
+| 2 | Amount |
+| 3 | Description |
+
+Bot returns an invoice code (e.g. `INV-A1B2C3`) to share with the customer. The customer (or another business) pays via **Pay Invoice** using that code.
+
+Invoices stay `pending` until a linked `invoice_payment` transaction completes.
+
+---
+
+## Workflow 6 — Check balance, history & status
+
+### Check balance (both account types)
+
+- Polls pending transactions first (`settlePending`)
+- Returns all currency balances, e.g. `BWP: 5000.00`
+
+### Transaction history (both)
+
+- Last **5** transactions with type, amount, status, recipient
+
+### Status lookup (business only)
+
+Accepts:
+
+- Yellow Card reference (UUID from payout/top-up)
+- Internal payment reference
+- Invoice code (`INV-…`)
+
+Polls Yellow Card before displaying status. Pending sends may complete and trigger receipt delivery during lookup.
+
+---
+
+## Sandbox testing
+
+Use Yellow Card sandbox: `YELLOWCARD_BASE_URL=https://sandbox.api.yellowcard.io`
+
+Fund the **YC Treasury** in the sandbox dashboard (stablecoin top-up address). Sandbox accounts often ship with pre-funded balance.
+
+### Test account numbers
+
+Per [YC Sandbox Testing](https://docs.yellowcard.engineering/docs/sandbox-testing-api.md):
+
+| Type | Success | Failure |
+|------|---------|---------|
+| Bank account | `1111111111` | `0000000000` |
+| Mobile money | `+{countryCode}1111111111` | `+{countryCode}0000000000` |
+
+**Botswana momo success:** `+2671111111111`  
+**South Africa bank success:** `1111111111`  
+**Zambia momo success:** `+2601111111111`
+
+Real phone numbers in sandbox may stay **pending** indefinitely.
+
+---
+
+## Setup
+
+### 1. Supabase
 
 1. Create a project at https://app.supabase.com
-2. Open **SQL Editor** → paste the contents of `db/schema.sql` → run it.
-3. Go to **Settings → API** and copy:
-   - `Project URL` → this is `SUPABASE_URL`
-   - `service_role` secret key → this is `SUPABASE_SERVICE_ROLE_KEY`
-   (Not the `anon` key — this app needs full server-side access.)
+2. Run `db/schema.sql` in the SQL Editor (safe to re-run)
+3. Copy **Project URL** → `SUPABASE_URL`
+4. Copy **service_role** key → `SUPABASE_SERVICE_ROLE_KEY`
 
-## 2. Set up Twilio WhatsApp
+### 2. Twilio WhatsApp
 
-1. Create a Twilio account: https://console.twilio.com
-2. For testing: enable the **WhatsApp Sandbox** (Messaging → Try it out →
-   Send a WhatsApp message). For production, apply for a WhatsApp Sender.
-3. From the Twilio Console home page, copy:
-   - `Account SID` → `TWILIO_ACCOUNT_SID`
-   - `Auth Token` → `TWILIO_AUTH_TOKEN`
-4. Note your WhatsApp-enabled number, e.g. `whatsapp:+14155238886` → `TWILIO_WHATSAPP_NUMBER`
-5. Once deployed (step 4 below), come back and set the sandbox/sender's
-   **"When a message comes in"** webhook to:
-   `https://<your-vercel-app>.vercel.app/api/whatsapp`
+1. Create account at https://console.twilio.com
+2. Enable WhatsApp Sandbox (testing) or apply for a production sender
+3. Set **When a message comes in** webhook to:
+   `https://<your-app>.vercel.app/api/whatsapp` (HTTP POST)
+4. Copy Account SID, Auth Token, WhatsApp number → env vars
 
-## 3. Set up Yellow Card
+### 3. Yellow Card
 
-1. Get sandbox API access at https://docs.yellowcard.engineering
-2. From the dashboard, get your **API key** and **secret key**
-   → `YELLOWCARD_API_KEY`, `YELLOWCARD_SECRET_KEY`
-3. Auth is already implemented correctly in `lib/yellowcard.js` — Yellow Card
-   uses an `Authorization: YcHmacV1 {apiKey}:{signature}` header plus
-   `X-YC-Timestamp`, where the signature is an HMAC-SHA256 (in base64) over
-   `timestamp + path + METHOD (+ base64(sha256(body)) for POST/PUT)`.
-   Confirmed directly against their docs — nothing to change here.
-4. In the Yellow Card dashboard, create a webhook pointing to:
-   `https://<your-vercel-app>.vercel.app/api/yellowcard-webhook`
-   Subscribe to `RECEIVE.COMPLETE`, `RECEIVE.FAILED`, `SEND.COMPLETE`,
-   `SEND.FAILED` (or leave it unfiltered to get all events).
-5. Keep `YELLOWCARD_BASE_URL=https://sandbox.api.yellowcard.io` while testing.
-   Switch to the production URL Yellow Card gives you when you go live —
-   production also requires you to share your server's static IP for
-   whitelisting (Vercel functions don't have a fixed outbound IP by default,
-   so you'll likely need a paid add-on like Vercel's "Secure Compute" or a
-   NAT gateway — worth asking Yellow Card and Vercel about this specifically
-   before going live).
+1. Get sandbox credentials from https://docs.yellowcard.engineering
+2. Set `YELLOWCARD_API_KEY`, `YELLOWCARD_SECRET_KEY`, `YELLOWCARD_BASE_URL`
+3. Register webhook: `https://<your-app>.vercel.app/api/yellowcard-webhook`
+   - Subscribe to: `RECEIVE.COMPLETE`, `RECEIVE.FAILED`, `SEND.COMPLETE`, `SEND.FAILED`
+4. Fund Treasury balance in the YC dashboard before testing sends
 
-### Sandbox test values
-- Mobile money account number `1111111111` simulates a **successful** payment.
-- Mobile money account number `0000000000` simulates a **failed** payment.
-- Sandbox receive requests expire after 10 minutes if not accepted — this
-  bot uses `forceAccept: true` so they process immediately, no separate
-  accept step needed.
+### 4. Resend (KYC emails)
 
-## 4. Deploy to Vercel
+- `RESEND_API_KEY` from https://resend.com/api-keys
+- `RESEND_FROM_EMAIL` — `PayLink <onboarding@resend.dev>` works for testing
+- `ADMIN_EMAIL` — where review emails are sent
 
-1. Push this folder to a GitHub repo.
-2. Go to https://vercel.com/new and import that repo.
-3. Before the first deploy, go to **Settings → Environment Variables** and
-   add every variable listed in `.env.example` with your real values.
-4. Deploy. Vercel will give you a URL like `https://your-app.vercel.app`.
-5. Set `PUBLIC_APP_URL` env var to that exact URL, then redeploy (needed for
-   Twilio signature verification).
-6. Go back and paste the two webhook URLs (step 2.5 and step 3.4 above)
-   using your real Vercel URL.
+### 5. Deploy to Vercel
 
-## 5. Set up a cron trigger for `/api/poll-topups`
+1. Push to GitHub and import in Vercel
+2. Add all variables from `.env.example`
+3. Set `PUBLIC_APP_URL` to your Vercel URL (no trailing slash) and redeploy
+4. Configure Twilio and YC webhooks with the live URL
 
-The bot already settles pending top-ups/sends two ways without any extra setup:
-- **The Yellow Card webhook** (`/api/yellowcard-webhook`) — fires the moment YC's
-  status changes. This is the primary path.
-- **A fire-and-forget check** at the start of every WhatsApp message a user sends
-  (`settlePending` in `lib/conversation.js`) — catches anything the webhook missed,
-  but only for that specific user, and only when they message the bot again.
+### 6. Cron poller (recommended)
 
-Neither of those covers the case where a payment finishes and the *webhook delivery
-fails* (network blip, YC retry exhausted, etc.) and the user never sends another
-message. For that, add a third safety net: an external cron service that hits
-`/api/poll-topups` every few minutes for **all** users with pending transactions.
+Hit every 2–5 minutes:
 
-1. Create a free account at something like https://cron-job.org (Vercel Hobby plan
-   cron jobs are limited to once/day, which is too infrequent for payment status —
-   an external service gives you per-minute scheduling for free).
-2. Set it to call, every 2–5 minutes:
-   `https://<your-vercel-app>.vercel.app/api/poll-topups?secret=<your CRON_SECRET>`
-   (or send `X-Cron-Secret: <your CRON_SECRET>` as a header instead of the query param)
-3. Make sure `CRON_SECRET` is set in Vercel's environment variables (see `.env.example`)
-   — without it, the endpoint is unauthenticated and callable by anyone who finds the URL.
+```
+https://<your-app>.vercel.app/api/poll-topups?secret=<CRON_SECRET>
+```
 
-## 6. Test it
+Free options: [cron-job.org](https://cron-job.org). Vercel Hobby cron is limited to once/day.
 
-Message your Twilio WhatsApp sandbox number "hi" — you should get the menu.
-Try creating an invoice (option 1), then from a second phone number, reply
-"2" and pay it with that invoice code.
+---
 
-## What's intentionally simple in this MVP (next steps for later)
+## Environment variables
 
-- **KYC collection has basic format validation** (DOB format, email format,
-  minimum ID number length) but no document verification beyond a manual
-  human review of the uploaded photos/PDFs — that's by design (see the
-  manual-review-by-email flow above), not a gap.
-- **Network selection uses a name-matching heuristic, not a user-facing
-  choice**: when paying via mobile money, the bot prefers a network whose
-  name matches a known provider (MyZaka, Orange, Mascom, BTC) and falls back
-  to the first active network Yellow Card returns. This works for the
-  currently-supported countries (each has at most a couple of networks per
-  channel) but if Yellow Card adds more competing providers per country later,
-  you'll want to list options and let the user pick explicitly — see
-  `yc.getNetworks()` in `lib/yellowcard.js`.
-- **Idempotency and retries are handled** at the wallet-ledger level (every
-  top-up/send is credited or refunded exactly once, guarded by a status
-  check before each wallet update) across all three settlement paths — the
-  webhook, the cron poller, and the fire-and-forget per-message check. Yellow
-  Card API calls themselves aren't retried on transient network failures
-  beyond the built-in request timeout — a dropped request currently surfaces
-  as a failure to the user rather than being retried automatically.
-- **No admin dashboard** — all data lives in Supabase; use the Supabase
-  table editor to view/manage invoices and transactions for now.
-- **Static IP for production webhooks/whitelisting**: see the note in the
-  Yellow Card setup section above — this needs solving before going live
-  on Vercel.
-- **No rate limiting** on `/api/whatsapp` or `/api/poll-topups` beyond Twilio
-  signature verification and the `CRON_SECRET` check — fine at low volume,
-  worth adding (e.g. Vercel's Edge Config or a simple per-phone cooldown) if
-  the bot is ever exposed to abuse/spam traffic.
+See `.env.example` for the full list:
+
+| Variable | Purpose |
+|----------|---------|
+| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_WHATSAPP_NUMBER` | WhatsApp messaging |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Database |
+| `YELLOWCARD_API_KEY` / `YELLOWCARD_SECRET_KEY` / `YELLOWCARD_BASE_URL` | Payments API |
+| `RESEND_API_KEY` / `RESEND_FROM_EMAIL` / `ADMIN_EMAIL` | KYC review emails |
+| `PUBLIC_APP_URL` | Webhooks, receipts, admin links |
+| `CRON_SECRET` | Protects `/api/poll-topups` |
+
+---
+
+## Data model (Supabase)
+
+| Table | Purpose |
+|-------|---------|
+| `users` | One row per WhatsApp phone; KYC fields; `account_type`; `kyc_status` |
+| `kyc_submissions` | Document URLs, approval token, admin decisions |
+| `sessions` | Conversation state machine (`state` + `context` JSON) |
+| `wallets` | Balance per user per currency (BWP, ZAR, ZMW) |
+| `transactions` | Top-ups, sends, invoice payments; YC reference; receipt flag |
+| `invoices` | Business-created invoices with shareable codes |
+
+---
+
+## Known limitations & production notes
+
+- **KYC** — format validation + manual document review; no automated ID verification
+- **Network selection** — bot auto-picks provider (MyZaka, Orange, Mascom, BTC heuristic); no user-facing network menu
+- **No admin dashboard** — use Supabase table editor or build one later
+- **Production IP whitelist** — Yellow Card may require static outbound IP (Vercel needs Secure Compute or similar)
+- **No rate limiting** on webhooks beyond Twilio signature + `CRON_SECRET`
+- **YC API retries** — transient failures surface as user-visible errors; wallet refunds on failed debits where applicable
+- **Old pending transactions** from before payload fixes may need Yellow Card support to cancel
+
+---
+
+## Quick test checklist
+
+1. Message the bot **hi** → welcome menu
+2. Complete registration → admin approves via email
+3. **Top-up** 100 BWP via momo sandbox number `+2671111111111`
+4. **Check balance** → should show credited amount
+5. **Send** 50 BWP to `+2671111111111` → receive PDF receipt
+6. (Business) **Create invoice** → pay from second number with invoice code
+
+---
+
+## Tech stack
+
+- **Runtime:** Node.js serverless functions on Vercel
+- **Messaging:** Twilio WhatsApp API
+- **Database:** Supabase (PostgreSQL)
+- **Payments:** Yellow Card API (HMAC auth, receive + send)
+- **Email:** Resend (KYC review with approve/reject/request-info)
+- **Receipts:** PDF generated on the fly (`lib/pdf.js`)

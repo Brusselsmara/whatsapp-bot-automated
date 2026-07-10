@@ -1,11 +1,17 @@
 const { supabase } = require('../lib/db');
 const { sendWhatsApp } = require('../lib/twilio');
 const yc = require('../lib/yellowcard');
+const {
+  claimTopupCredit,
+  claimSendComplete,
+  claimSendRefund,
+  claimReceiptSent,
+  markTopupFailed,
+} = require('../lib/settlement');
 
 /**
  * GET /api/poll-topups
  * Polls Yellow Card for all unsettled topups and sends across ALL users.
- * Can be triggered manually or by an external cron service (e.g. cron-job.org).
  * Protected by CRON_SECRET env var.
  */
 module.exports = async (req, res) => {
@@ -38,9 +44,7 @@ module.exports = async (req, res) => {
 
     console.log(`[POLL] Checking ${pending.length} transaction(s)`);
 
-    const results = await Promise.allSettled(
-      pending.map((txn) => pollOne(txn))
-    );
+    const results = await Promise.allSettled(pending.map((txn) => pollOne(txn)));
 
     const summary = results.map((r, i) => ({
       id: pending[i].id,
@@ -62,9 +66,7 @@ async function pollOne(txn) {
 
   let ycData;
   try {
-    ycData = txn.type === 'topup'
-      ? await yc.getReceive(ref)
-      : await yc.getSend(ref);
+    ycData = txn.type === 'topup' ? await yc.getReceive(ref) : await yc.getSend(ref);
   } catch (err) {
     console.error(`[POLL] Fetch failed for ${txn.id}:`, err.message);
     return `fetch_error: ${err.message}`;
@@ -77,125 +79,78 @@ async function pollOne(txn) {
   const FAILED = ['FAILED', 'EXPIRED', 'CANCELLED'];
 
   if (COMPLETE.includes(ycStatus)) {
-    return txn.type === 'topup'
-      ? creditWallet(txn, ycData)
-      : completeSend(txn, ycData);
+    return txn.type === 'topup' ? creditWallet(txn, ycData) : completeSend(txn, ycData);
   }
 
   if (FAILED.includes(ycStatus)) {
-    return txn.type === 'topup'
-      ? failTopup(txn, ycData, ycStatus)
-      : failSend(txn, ycData);
+    return txn.type === 'topup' ? failTopup(txn, ycData) : failSend(txn, ycData);
   }
 
   return `still_${ycStatus.toLowerCase() || 'pending'}`;
 }
 
 async function creditWallet(txn, ycData) {
-  // Idempotency guard
-  const { data: fresh } = await supabase
-    .from('transactions').select('status').eq('id', txn.id).single();
-  if (fresh?.status === 'completed') return 'already_completed';
+  const result = await claimTopupCredit(txn.id, ycData);
+  if (!result.claimed) return 'already_completed';
 
-  await supabase.from('transactions')
-    .update({ status: 'completed', updated_at: new Date().toISOString(), raw_response: ycData })
-    .eq('id', txn.id);
+  console.log(`[POLL] ✅ Credited ${result.amount} ${result.currency} — balance ${result.newBalance}`);
+  await sendWhatsApp(result.phone,
+    `✅ Top-up confirmed!\n\n*${result.amount} ${result.currency}* added to your wallet.\nNew balance: *${result.newBalance} ${result.currency}*\n\nReply *menu* to continue.`);
 
-  const { data: wallet } = await supabase
-    .from('wallets').select('balance')
-    .eq('phone', txn.phone).eq('currency', txn.currency).single();
-
-  const prev = parseFloat(wallet?.balance ?? 0);
-  const next = parseFloat((prev + parseFloat(txn.amount)).toFixed(2));
-
-  const { error } = await supabase.from('wallets').upsert(
-    { phone: txn.phone, currency: txn.currency, balance: next, updated_at: new Date().toISOString() },
-    { onConflict: 'phone,currency' }
-  );
-  if (error) {
-    console.error(`[POLL] Wallet upsert failed for ${txn.id}:`, error.message, error.details);
-    return `upsert_failed: ${error.message}`;
-  }
-
-  console.log(`[POLL] ✅ Credited ${txn.amount} ${txn.currency} — ${prev} → ${next}`);
-  await sendWhatsApp(txn.phone,
-    `✅ Top-up confirmed!\n\n*${txn.amount} ${txn.currency}* added to your wallet.\nNew balance: *${next} ${txn.currency}*\n\nReply *menu* to continue.`);
-
-  return `credited: ${prev} → ${next}`;
+  return `credited: ${result.newBalance}`;
 }
 
-async function failTopup(txn, ycData, ycStatus) {
-  const { data: fresh } = await supabase
-    .from('transactions').select('status').eq('id', txn.id).single();
-  if (fresh?.status === 'failed') return 'already_failed';
+async function failTopup(txn, ycData) {
+  const result = await markTopupFailed(txn.id, ycData);
+  if (!result.claimed) return 'already_failed';
 
-  await supabase.from('transactions')
-    .update({ status: 'failed', updated_at: new Date().toISOString(), raw_response: ycData })
-    .eq('id', txn.id);
-
-  await sendWhatsApp(txn.phone,
-    `⚠️ Your top-up of *${txn.amount} ${txn.currency}* could not be completed. Please reply *menu* to try again.`);
-  return `failed: ${ycStatus}`;
+  await sendWhatsApp(result.phone,
+    `⚠️ Your top-up of *${result.amount} ${result.currency}* could not be completed. Please reply *menu* to try again.`);
+  return 'failed';
 }
 
 async function completeSend(txn, ycData) {
-  const { data: fresh } = await supabase
-    .from('transactions').select('status, receipt_sent').eq('id', txn.id).single();
-  if (fresh?.status === 'completed') return 'already_completed';
+  const result = await claimSendComplete(txn.id, ycData);
+  if (!result.claimed) return 'already_completed';
 
-  await supabase.from('transactions')
-    .update({ status: 'completed', updated_at: new Date().toISOString(), raw_response: ycData })
-    .eq('id', txn.id);
-
-  if (!fresh?.receipt_sent) {
-    const base = (process.env.PUBLIC_APP_URL || '').replace(/\/$/, '');
-    const receiptUrl = `${base}/api/receipt?id=${txn.id}`;
-    const label = txn.type === 'invoice_payment' ? 'Invoice payment' : 'Transfer';
-    try {
-      await sendWhatsApp(txn.phone,
-        `✅ *${label} confirmed!*\n\n*${txn.amount} ${txn.currency}* sent to *${txn.recipient_name}*.\n\nYour receipt is attached.`,
-        receiptUrl);
-      await supabase.from('transactions').update({ receipt_sent: true }).eq('id', txn.id);
-    } catch (e) {
-      console.error(`[POLL] Receipt send failed for ${txn.id}:`, e.message);
-      return `notify_failed: ${e.message}`;
-    }
-  }
-
-  if (txn.invoice_id) {
+  if (result.invoiceId) {
     await supabase.from('invoices')
       .update({ status: 'paid', paid_at: new Date().toISOString() })
-      .eq('id', txn.invoice_id);
+      .eq('id', result.invoiceId);
+  }
+
+  if (result.receiptPending) {
+    const receiptClaim = await claimReceiptSent(txn.id);
+    if (receiptClaim.claimed) {
+      const { data: fresh } = await supabase.from('transactions').select('*').eq('id', txn.id).single();
+      const row = fresh || txn;
+      const base = (process.env.PUBLIC_APP_URL || '').replace(/\/$/, '');
+      const receiptUrl = `${base}/api/receipt?id=${row.id}`;
+      const label = row.type === 'invoice_payment' ? 'Invoice payment' : 'Transfer';
+      const displayAmount = row.payout_amount != null ? row.payout_amount : row.amount;
+      try {
+        await sendWhatsApp(row.phone,
+          `✅ *${label} confirmed!*\n\n*${displayAmount} ${row.currency}* sent to *${row.recipient_name}*.\n\nYour receipt is attached.`,
+          receiptUrl);
+      } catch (e) {
+        console.error(`[POLL] Receipt send failed for ${txn.id}:`, e.message);
+        await supabase.from('transactions').update({ receipt_sent: false }).eq('id', txn.id);
+        return `notify_failed: ${e.message}`;
+      }
+    }
   }
 
   return 'send_completed';
 }
 
 async function failSend(txn, ycData) {
-  const { data: fresh } = await supabase
-    .from('transactions').select('status').eq('id', txn.id).single();
-  if (fresh?.status === 'failed') return 'already_failed';
+  const result = await claimSendRefund(txn.id, ycData);
+  if (!result.claimed) return 'already_failed';
 
-  await supabase.from('transactions')
-    .update({ status: 'failed', updated_at: new Date().toISOString(), raw_response: ycData })
-    .eq('id', txn.id);
+  console.log(`[POLL] ↩️ Refunded ${result.amount} ${result.currency} — balance ${result.newBalance}`);
+  const { data: fresh } = await supabase.from('transactions').select('recipient_name').eq('id', txn.id).single();
+  await sendWhatsApp(result.phone,
+    `⚠️ Your transfer of *${result.amount} ${result.currency}* to ${fresh?.recipient_name || txn.recipient_name} failed. Your balance has been refunded.`);
 
-  // Refund
-  const { data: wallet } = await supabase
-    .from('wallets').select('balance')
-    .eq('phone', txn.phone).eq('currency', txn.currency).single();
-  const prev = parseFloat(wallet?.balance ?? 0);
-  const refunded = parseFloat((prev + parseFloat(txn.amount)).toFixed(2));
-
-  const { error } = await supabase.from('wallets').upsert(
-    { phone: txn.phone, currency: txn.currency, balance: refunded, updated_at: new Date().toISOString() },
-    { onConflict: 'phone,currency' }
-  );
-  if (error) console.error(`[POLL] Refund upsert failed for ${txn.id}:`, error.message);
-  else {
-    console.log(`[POLL] ↩️ Refunded ${txn.amount} ${txn.currency} — ${prev} → ${refunded}`);
-    await sendWhatsApp(txn.phone,
-      `⚠️ Your transfer of *${txn.amount} ${txn.currency}* to ${txn.recipient_name} failed. Your balance has been refunded.`);
-  }
   return 'send_failed_refunded';
 }

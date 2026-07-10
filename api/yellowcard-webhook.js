@@ -1,6 +1,13 @@
 const { supabase } = require('../lib/db');
 const { sendWhatsApp } = require('../lib/twilio');
-const { verifyWebhookSignature } = require('../lib/yellowcard');
+const { getWebhookSignature, verifyWebhookSignature } = require('../lib/yellowcard');
+const {
+  claimTopupCredit,
+  claimSendComplete,
+  claimSendRefund,
+  claimReceiptSent,
+  markTopupFailed,
+} = require('../lib/settlement');
 
 module.exports.config = { api: { bodyParser: false } };
 
@@ -17,11 +24,11 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).send('Method not allowed');
 
   const rawBody = await readRawBody(req);
-  const signature = req.headers['x-yc-signature'];
+  const signature = getWebhookSignature(req.headers);
 
-  if (process.env.NODE_ENV === 'production' && !verifyWebhookSignature(rawBody, signature)) {
-    console.error('[WEBHOOK] Signature mismatch — rejecting');
-    return res.status(403).send('Invalid signature');
+  if (!verifyWebhookSignature(rawBody, signature)) {
+    console.error('[WEBHOOK] Signature mismatch — rejecting (401)');
+    return res.status(401).send('Unauthorized');
   }
 
   let event;
@@ -40,8 +47,6 @@ module.exports = async (req, res) => {
       return res.status(200).json({ received: true, note: 'ignored' });
     }
 
-    // Look up first, handle wallet/receipt side-effects, then update status.
-    // (Updating status before handling caused idempotency checks to skip credits.)
     let txn = await findTxn(ycId);
     if (!txn) txn = await findTxn(event.sequenceId || '');
 
@@ -50,17 +55,13 @@ module.exports = async (req, res) => {
       return res.status(200).json({ received: true, note: 'no matching transaction' });
     }
 
-    const previousStatus = txn.status;
-
-    if (txn.type === 'topup') await handleTopupUpdate(txn, status, previousStatus);
-    else await handleSendUpdate(txn, status, event, previousStatus);
-
-    await updateTxnStatus(txn.id, status, event);
+    if (txn.type === 'topup') await handleTopupUpdate(txn, status, event);
+    else await handleSendUpdate(txn, status, event);
 
     return res.status(200).json({ received: true });
   } catch (err) {
     console.error('[WEBHOOK] Error:', err);
-    return res.status(200).json({ received: true, error: 'logged' });
+    return res.status(500).json({ received: false, error: 'logged' });
   }
 };
 
@@ -74,91 +75,83 @@ async function findTxn(ycId) {
   return data || null;
 }
 
-async function updateTxnStatus(txnId, status, event) {
-  await supabase
-    .from('transactions')
-    .update({ status, updated_at: new Date().toISOString(), raw_response: event })
-    .eq('id', txnId);
-}
-
-async function handleTopupUpdate(txn, status, previousStatus) {
-  // Idempotency: only skip if wallet was already credited on a prior event
-  if (previousStatus === 'completed' && status === 'completed') {
-    console.log(`[WEBHOOK] topup ${txn.id} already completed — skipping credit`);
-    return;
-  }
-
+async function handleTopupUpdate(txn, status, event) {
   if (status === 'completed') {
-    const { data: wallet } = await supabase
-      .from('wallets').select('balance')
-      .eq('phone', txn.phone).eq('currency', txn.currency).single();
-
-    const prev = parseFloat(wallet?.balance ?? 0);
-    const next = parseFloat((prev + parseFloat(txn.amount)).toFixed(2));
-
-    const { error } = await supabase.from('wallets').upsert(
-      { phone: txn.phone, currency: txn.currency, balance: next, updated_at: new Date().toISOString() },
-      { onConflict: 'phone,currency' }
-    );
-    if (error) {
-      console.error(`[WEBHOOK] Wallet upsert failed for topup ${txn.id}:`, error.message);
+    const result = await claimTopupCredit(txn.id, event);
+    if (!result.claimed) {
+      console.log(`[WEBHOOK] topup ${txn.id} already settled — skipping credit`);
       return;
     }
-    console.log(`[WEBHOOK] ✅ Topup credited ${txn.amount} ${txn.currency} — ${prev} → ${next}`);
-    await sendWhatsApp(txn.phone,
-      `✅ Top-up of *${txn.amount} ${txn.currency}* confirmed!\n\nNew balance: *${next} ${txn.currency}*`);
+    console.log(`[WEBHOOK] ✅ Topup credited ${result.amount} ${result.currency} — balance ${result.newBalance}`);
+    await sendWhatsApp(result.phone,
+      `✅ Top-up of *${result.amount} ${result.currency}* confirmed!\n\nNew balance: *${result.newBalance} ${result.currency}*`);
 
   } else if (status === 'failed') {
-    await sendWhatsApp(txn.phone,
-      `⚠️ Your top-up of *${txn.amount} ${txn.currency}* failed. Please reply *menu* to try again.`);
+    const result = await markTopupFailed(txn.id, event);
+    if (!result.claimed) return;
+    await sendWhatsApp(result.phone,
+      `⚠️ Your top-up of *${result.amount} ${result.currency}* failed. Please reply *menu* to try again.`);
+  } else {
+    await supabase.from('transactions')
+      .update({ status, updated_at: new Date().toISOString(), raw_response: event })
+      .eq('id', txn.id)
+      .in('status', ['pending', 'processing', 'created']);
   }
 }
 
-async function handleSendUpdate(txn, status, event, previousStatus) {
+async function handleSendUpdate(txn, status, event) {
   if (status === 'completed') {
-    if (txn.receipt_sent) {
-      console.log(`[WEBHOOK] send ${txn.id} receipt already sent — skipping`);
+    const result = await claimSendComplete(txn.id, event);
+    if (!result.claimed) {
+      console.log(`[WEBHOOK] send ${txn.id} already completed — skipping`);
       return;
     }
-    const base = (process.env.PUBLIC_APP_URL || '').replace(/\/$/, '');
-    const receiptUrl = `${base}/api/receipt?id=${txn.id}`;
-    const label = txn.type === 'invoice_payment' ? 'Invoice payment' : 'Transfer';
-    try {
-      await sendWhatsApp(txn.phone,
-        `✅ *${label} confirmed!*\n\n*${txn.amount} ${txn.currency}* sent to *${txn.recipient_name}*.\n\nYour receipt is attached.`,
-        receiptUrl);
-      await supabase.from('transactions').update({ receipt_sent: true }).eq('id', txn.id);
-    } catch (e) {
-      console.error(`[WEBHOOK] Receipt send failed for ${txn.id}:`, e.message);
-    }
 
-    if (txn.invoice_id) {
+    if (result.invoiceId) {
       await supabase.from('invoices')
         .update({ status: 'paid', paid_at: new Date().toISOString() })
-        .eq('id', txn.invoice_id);
+        .eq('id', result.invoiceId);
+    }
+
+    if (result.receiptPending) {
+      const receiptClaim = await claimReceiptSent(txn.id);
+      if (receiptClaim.claimed) {
+        const { data: fresh } = await supabase.from('transactions').select('*').eq('id', txn.id).single();
+        await deliverReceipt(fresh || txn);
+      }
     }
 
   } else if (status === 'failed') {
-    if (previousStatus === 'failed') return; // already refunded
-
-    const { data: wallet } = await supabase
-      .from('wallets').select('balance')
-      .eq('phone', txn.phone).eq('currency', txn.currency).single();
-
-    const prev = parseFloat(wallet?.balance ?? 0);
-    const refunded = parseFloat((prev + parseFloat(txn.amount)).toFixed(2));
-
-    const { error } = await supabase.from('wallets').upsert(
-      { phone: txn.phone, currency: txn.currency, balance: refunded, updated_at: new Date().toISOString() },
-      { onConflict: 'phone,currency' }
-    );
-    if (error) {
-      console.error(`[WEBHOOK] Wallet refund failed for send ${txn.id}:`, error.message);
+    const result = await claimSendRefund(txn.id, event);
+    if (!result.claimed) {
+      console.log(`[WEBHOOK] send ${txn.id} refund already processed — skipping`);
       return;
     }
-    console.log(`[WEBHOOK] ↩️ Refunded ${txn.amount} ${txn.currency} — ${prev} → ${refunded}`);
+    console.log(`[WEBHOOK] ↩️ Refunded ${result.amount} ${result.currency} — balance ${result.newBalance}`);
+    const { data: fresh } = await supabase.from('transactions').select('recipient_name').eq('id', txn.id).single();
+    await sendWhatsApp(result.phone,
+      `⚠️ Your transfer of *${result.amount} ${result.currency}* to ${fresh?.recipient_name || txn.recipient_name} failed. Your balance has been refunded.`);
+
+  } else {
+    await supabase.from('transactions')
+      .update({ status, updated_at: new Date().toISOString(), raw_response: event })
+      .eq('id', txn.id)
+      .in('status', ['pending', 'processing', 'created']);
+  }
+}
+
+async function deliverReceipt(txn) {
+  const base = (process.env.PUBLIC_APP_URL || '').replace(/\/$/, '');
+  const receiptUrl = `${base}/api/receipt?id=${txn.id}`;
+  const label = txn.type === 'invoice_payment' ? 'Invoice payment' : 'Transfer';
+  const displayAmount = txn.payout_amount != null ? txn.payout_amount : txn.amount;
+  try {
     await sendWhatsApp(txn.phone,
-      `⚠️ Your transfer of *${txn.amount} ${txn.currency}* to ${txn.recipient_name} failed. Your balance has been refunded.`);
+      `✅ *${label} confirmed!*\n\n*${displayAmount} ${txn.currency}* sent to *${txn.recipient_name}*.\n\nYour receipt is attached.`,
+      receiptUrl);
+  } catch (e) {
+    console.error(`[WEBHOOK] Receipt send failed for ${txn.id}:`, e.message);
+    await supabase.from('transactions').update({ receipt_sent: false }).eq('id', txn.id);
   }
 }
 

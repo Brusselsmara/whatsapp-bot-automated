@@ -36,6 +36,9 @@ alter table users add column if not exists kyc_id_type text;
 alter table users add column if not exists kyc_id_number text;
 alter table users add column if not exists kyc_email text;
 
+-- Per-business FX margin (default 2%; VIP corporate e.g. 0.01 = 1%)
+alter table users add column if not exists fx_margin_pct numeric(6,4) default 0.02;
+
 -- ============================================================
 -- KYC SUBMISSIONS — one row per registration attempt, holds the
 -- document links and the approve/reject token you click in email
@@ -127,6 +130,12 @@ alter table transactions add column if not exists markup_amount numeric(18,2) de
 -- Settlement idempotency flags (row-level locking in RPC functions below)
 alter table transactions add column if not exists wallet_credited boolean default false;
 alter table transactions add column if not exists wallet_refunded boolean default false;
+
+-- Live FX quote locked at payment time
+alter table transactions add column if not exists quote_id text;
+alter table transactions add column if not exists yc_rate numeric(18,6);
+alter table transactions add column if not exists display_rate numeric(18,6);
+alter table transactions add column if not exists quote_expires_at timestamptz;
 
 -- ============================================================
 -- ATOMIC SETTLEMENT RPCs (SELECT … FOR UPDATE — prevents double-credit)

@@ -120,12 +120,17 @@ async function handleSendUpdate(txn, status, event, previousStatus) {
       console.log(`[WEBHOOK] send ${txn.id} receipt already sent — skipping`);
       return;
     }
-    const receiptUrl = `${process.env.PUBLIC_APP_URL}/api/receipt?id=${txn.id}`;
+    const base = (process.env.PUBLIC_APP_URL || '').replace(/\/$/, '');
+    const receiptUrl = `${base}/api/receipt?id=${txn.id}`;
     const label = txn.type === 'invoice_payment' ? 'Invoice payment' : 'Transfer';
-    await sendWhatsApp(txn.phone,
-      `✅ *${label} confirmed!*\n\n*${txn.amount} ${txn.currency}* sent to *${txn.recipient_name}*.\n\nYour receipt is attached.`,
-      receiptUrl);
-    await supabase.from('transactions').update({ receipt_sent: true }).eq('id', txn.id);
+    try {
+      await sendWhatsApp(txn.phone,
+        `✅ *${label} confirmed!*\n\n*${txn.amount} ${txn.currency}* sent to *${txn.recipient_name}*.\n\nYour receipt is attached.`,
+        receiptUrl);
+      await supabase.from('transactions').update({ receipt_sent: true }).eq('id', txn.id);
+    } catch (e) {
+      console.error(`[WEBHOOK] Receipt send failed for ${txn.id}:`, e.message);
+    }
 
     if (txn.invoice_id) {
       await supabase.from('invoices')

@@ -5,10 +5,9 @@ const {
   claimTopupCredit,
   claimSendComplete,
   claimSendRefund,
-  claimReceiptSent,
   markTopupFailed,
 } = require('../lib/settlement');
-const { getPublicAppUrl } = require('../lib/app-url');
+const { deliverSendReceipt, SEND_COMPLETE } = require('../lib/receipt-delivery');
 
 /**
  * GET /api/poll-topups
@@ -43,10 +42,19 @@ module.exports = async (req, res) => {
       .order('created_at', { ascending: true })
       .limit(50);
 
-    const error = statusErr || uncreditedErr;
+    const { data: pendingReceipts, error: receiptErr } = await supabase
+      .from('transactions')
+      .select('*')
+      .in('type', ['send', 'invoice_payment'])
+      .eq('status', 'completed')
+      .eq('receipt_sent', false)
+      .order('created_at', { ascending: true })
+      .limit(50);
+
+    const error = statusErr || uncreditedErr || receiptErr;
     const seen = new Set();
     const pending = [];
-    for (const txn of [...(byStatus || []), ...(uncreditedTopups || [])]) {
+    for (const txn of [...(byStatus || []), ...(uncreditedTopups || []), ...(pendingReceipts || [])]) {
       if (!seen.has(txn.id)) {
         seen.add(txn.id);
         pending.push(txn);
@@ -64,7 +72,12 @@ module.exports = async (req, res) => {
 
     console.log(`[POLL] Checking ${pending.length} transaction(s)`);
 
-    const results = await Promise.allSettled(pending.map((txn) => pollOne(txn)));
+    const results = await Promise.allSettled(pending.map((txn) => {
+      if (txn.status === 'completed' && !txn.receipt_sent && txn.type !== 'topup') {
+        return deliverSendReceipt(txn).then((r) => (r.sent ? 'receipt_sent' : `receipt_skipped:${r.reason}`));
+      }
+      return pollOne(txn);
+    }));
 
     const summary = results.map((r, i) => ({
       id: pending[i].id,
@@ -95,7 +108,7 @@ async function pollOne(txn) {
   const ycStatus = (ycData?.status || '').toUpperCase();
   console.log(`[POLL] txn=${txn.id} type=${txn.type} ycStatus=${ycStatus}`);
 
-  const COMPLETE = ['COMPLETE', 'COMPLETED', 'SUCCESS', 'SUCCESSFUL', 'SETTLED'];
+  const COMPLETE = SEND_COMPLETE;
   const FAILED = ['FAILED', 'EXPIRED', 'CANCELLED'];
 
   if (COMPLETE.includes(ycStatus)) {
@@ -139,7 +152,14 @@ async function failTopup(txn, ycData) {
 
 async function completeSend(txn, ycData) {
   const result = await claimSendComplete(txn.id, ycData);
-  if (!result.claimed) return 'already_completed';
+  if (!result.claimed) {
+    const { data: fresh } = await supabase.from('transactions').select('*').eq('id', txn.id).single();
+    if (fresh?.status === 'completed' && !fresh.receipt_sent) {
+      const r = await deliverSendReceipt(fresh);
+      return r.sent ? 'receipt_sent' : `receipt_skipped:${r.reason}`;
+    }
+    return 'already_completed';
+  }
 
   if (result.invoiceId) {
     await supabase.from('invoices')
@@ -148,25 +168,8 @@ async function completeSend(txn, ycData) {
   }
 
   if (result.receiptPending) {
-    const receiptClaim = await claimReceiptSent(txn.id);
-    if (receiptClaim.claimed) {
-      const { data: fresh } = await supabase.from('transactions').select('*').eq('id', txn.id).single();
-      const row = fresh || txn;
-      const base = getPublicAppUrl();
-      const receiptUrl = `${base}/api/receipt?id=${row.id}`;
-      const label = row.type === 'invoice_payment' ? 'Invoice payment' : 'Transfer';
-      const displayAmount = row.payout_amount != null ? row.payout_amount : row.amount;
-      const displayCurrency = row.payout_currency || row.currency;
-      try {
-        await sendWhatsApp(row.phone,
-          `✅ *${label} confirmed!*\n\n*${displayAmount} ${displayCurrency}* sent to *${row.recipient_name}*.\n\nYour receipt is attached.`,
-          receiptUrl);
-      } catch (e) {
-        console.error(`[POLL] Receipt send failed for ${txn.id}:`, e.message);
-        await supabase.from('transactions').update({ receipt_sent: false }).eq('id', txn.id);
-        return `notify_failed: ${e.message}`;
-      }
-    }
+    const r = await deliverSendReceipt(txn);
+    if (!r.sent) return `notify_failed: ${r.reason}`;
   }
 
   return 'send_completed';

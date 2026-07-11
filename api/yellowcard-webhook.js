@@ -5,10 +5,9 @@ const {
   claimTopupCredit,
   claimSendComplete,
   claimSendRefund,
-  claimReceiptSent,
   markTopupFailed,
 } = require('../lib/settlement');
-const { getPublicAppUrl } = require('../lib/app-url');
+const { deliverSendReceipt } = require('../lib/receipt-delivery');
 
 module.exports.config = { api: { bodyParser: false } };
 
@@ -109,6 +108,10 @@ async function handleSendUpdate(txn, status, event) {
   if (status === 'completed') {
     const result = await claimSendComplete(txn.id, event);
     if (!result.claimed) {
+      const { data: fresh } = await supabase.from('transactions').select('*').eq('id', txn.id).single();
+      if (fresh?.status === 'completed' && !fresh.receipt_sent) {
+        await deliverSendReceipt(fresh);
+      }
       console.log(`[WEBHOOK] send ${txn.id} already completed — skipping`);
       return;
     }
@@ -120,11 +123,8 @@ async function handleSendUpdate(txn, status, event) {
     }
 
     if (result.receiptPending) {
-      const receiptClaim = await claimReceiptSent(txn.id);
-      if (receiptClaim.claimed) {
-        const { data: fresh } = await supabase.from('transactions').select('*').eq('id', txn.id).single();
-        await deliverReceipt(fresh || txn);
-      }
+      const { data: fresh } = await supabase.from('transactions').select('*').eq('id', txn.id).single();
+      await deliverSendReceipt(fresh || txn);
     }
 
   } else if (status === 'failed') {
@@ -143,22 +143,6 @@ async function handleSendUpdate(txn, status, event) {
       .update({ status, updated_at: new Date().toISOString(), raw_response: event })
       .eq('id', txn.id)
       .in('status', ['pending', 'processing', 'created']);
-  }
-}
-
-async function deliverReceipt(txn) {
-  const base = getPublicAppUrl();
-  const receiptUrl = `${base}/api/receipt?id=${txn.id}`;
-  const label = txn.type === 'invoice_payment' ? 'Invoice payment' : 'Transfer';
-  const displayAmount = txn.payout_amount != null ? txn.payout_amount : txn.amount;
-  const displayCurrency = txn.payout_currency || txn.currency;
-  try {
-    await sendWhatsApp(txn.phone,
-      `✅ *${label} confirmed!*\n\n*${displayAmount} ${displayCurrency}* sent to *${txn.recipient_name}*.\n\nYour receipt is attached.`,
-      receiptUrl);
-  } catch (e) {
-    console.error(`[WEBHOOK] Receipt send failed for ${txn.id}:`, e.message);
-    await supabase.from('transactions').update({ receipt_sent: false }).eq('id', txn.id);
   }
 }
 

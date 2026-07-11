@@ -166,6 +166,7 @@ create or replace function claim_topup_credit(p_txn_id uuid, p_yc_response jsonb
 returns table(claimed boolean, phone text, currency text, amount numeric, new_balance numeric)
 language plpgsql
 as $$
+#variable_conflict use_column
 declare
   v transactions%rowtype;
   v_new_balance numeric;
@@ -254,6 +255,7 @@ create or replace function claim_send_refund(p_txn_id uuid, p_yc_response jsonb)
 returns table(claimed boolean, phone text, currency text, amount numeric, new_balance numeric)
 language plpgsql
 as $$
+#variable_conflict use_column
 declare
   v transactions%rowtype;
   v_new_balance numeric;

@@ -247,7 +247,7 @@ flowchart TD
 
 1. Home currency is ZAR → bank is the only channel, so no channel-choice step
 2. Enter amount → **confirm**
-3. Bot returns Yellow Card bank details + payment reference (`receive.id`)
+3. Bot returns Yellow Card bank details + payment reference (`receive.reference`, e.g. `BSM6435281`)
 4. User makes bank transfer with that reference
 5. Wallet credited when YC marks receive complete
 

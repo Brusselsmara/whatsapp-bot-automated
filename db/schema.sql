@@ -175,7 +175,7 @@ begin
   if not found
      or v.type <> 'topup'
      or v.wallet_credited
-     or v.status in ('completed', 'failed') then
+     or v.status = 'failed' then
     return query select false, null::text, null::text, null::numeric, null::numeric;
     return;
   end if;

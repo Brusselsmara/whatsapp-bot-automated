@@ -78,14 +78,19 @@ async function findTxn(ycId) {
 
 async function handleTopupUpdate(txn, status, event) {
   if (status === 'completed') {
-    const result = await claimTopupCredit(txn.id, event);
-    if (!result.claimed) {
-      console.log(`[WEBHOOK] topup ${txn.id} already settled — skipping credit`);
-      return;
+    try {
+      const result = await claimTopupCredit(txn.id, event);
+      if (!result.claimed) {
+        console.warn(`[WEBHOOK] topup ${txn.id} RECEIVE.COMPLETE but claimed=false — check wallet_credited / run db/schema.sql`);
+        return;
+      }
+      console.log(`[WEBHOOK] ✅ Topup credited ${result.amount} ${result.currency} — balance ${result.newBalance}`);
+      await sendWhatsApp(result.phone,
+        `✅ Top-up of *${result.amount} ${result.currency}* confirmed!\n\nNew balance: *${result.newBalance} ${result.currency}*`);
+    } catch (err) {
+      console.error(`[WEBHOOK] claim_topup_credit failed for ${txn.id}:`, err.message);
+      throw err;
     }
-    console.log(`[WEBHOOK] ✅ Topup credited ${result.amount} ${result.currency} — balance ${result.newBalance}`);
-    await sendWhatsApp(result.phone,
-      `✅ Top-up of *${result.amount} ${result.currency}* confirmed!\n\nNew balance: *${result.newBalance} ${result.currency}*`);
 
   } else if (status === 'failed') {
     const result = await markTopupFailed(txn.id, event);

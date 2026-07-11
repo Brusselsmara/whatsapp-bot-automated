@@ -26,13 +26,32 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const { data: pending, error } = await supabase
+    const { data: byStatus, error: statusErr } = await supabase
       .from('transactions')
       .select('*')
       .not('status', 'in', '("completed","failed")')
       .in('type', ['topup', 'send', 'invoice_payment'])
       .order('created_at', { ascending: true })
       .limit(50);
+
+    const { data: uncreditedTopups, error: uncreditedErr } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('type', 'topup')
+      .eq('wallet_credited', false)
+      .neq('status', 'failed')
+      .order('created_at', { ascending: true })
+      .limit(50);
+
+    const error = statusErr || uncreditedErr;
+    const seen = new Set();
+    const pending = [];
+    for (const txn of [...(byStatus || []), ...(uncreditedTopups || [])]) {
+      if (!seen.has(txn.id)) {
+        seen.add(txn.id);
+        pending.push(txn);
+      }
+    }
 
     if (error) {
       console.error('[POLL] Query error:', error.message);
@@ -76,7 +95,7 @@ async function pollOne(txn) {
   const ycStatus = (ycData?.status || '').toUpperCase();
   console.log(`[POLL] txn=${txn.id} type=${txn.type} ycStatus=${ycStatus}`);
 
-  const COMPLETE = ['COMPLETE', 'COMPLETED', 'SUCCESS'];
+  const COMPLETE = ['COMPLETE', 'COMPLETED', 'SUCCESS', 'SUCCESSFUL', 'SETTLED'];
   const FAILED = ['FAILED', 'EXPIRED', 'CANCELLED'];
 
   if (COMPLETE.includes(ycStatus)) {
@@ -91,14 +110,22 @@ async function pollOne(txn) {
 }
 
 async function creditWallet(txn, ycData) {
-  const result = await claimTopupCredit(txn.id, ycData);
-  if (!result.claimed) return 'already_completed';
+  try {
+    const result = await claimTopupCredit(txn.id, ycData);
+    if (!result.claimed) {
+      console.warn(`[POLL] topup ${txn.id} complete on YC but claimed=false — check wallet_credited / run db/schema.sql`);
+      return 'already_completed';
+    }
 
-  console.log(`[POLL] ✅ Credited ${result.amount} ${result.currency} — balance ${result.newBalance}`);
-  await sendWhatsApp(result.phone,
-    `✅ Top-up confirmed!\n\n*${result.amount} ${result.currency}* added to your wallet.\nNew balance: *${result.newBalance} ${result.currency}*\n\nReply *menu* to continue.`);
+    console.log(`[POLL] ✅ Credited ${result.amount} ${result.currency} — balance ${result.newBalance}`);
+    await sendWhatsApp(result.phone,
+      `✅ Top-up confirmed!\n\n*${result.amount} ${result.currency}* added to your wallet.\nNew balance: *${result.newBalance} ${result.currency}*\n\nReply *menu* to continue.`);
 
-  return `credited: ${result.newBalance}`;
+    return `credited: ${result.newBalance}`;
+  } catch (err) {
+    console.error(`[POLL] claim_topup_credit failed for ${txn.id}:`, err.message);
+    return `credit_error: ${err.message}`;
+  }
 }
 
 async function failTopup(txn, ycData) {

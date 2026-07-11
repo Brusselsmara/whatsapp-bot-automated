@@ -303,8 +303,7 @@ flowchart TD
     Q -->|no| S[submitSend, no quote needed]
     R --> S
     S --> T[YC submitSend + full KYC]
-    T --> U[acceptSend fallback if needed]
-    U --> V[Transaction pending in DB]
+    T --> V[Transaction pending in DB]
     V --> W{YC completes?}
     W -->|yes| X[PDF receipt via WhatsApp]
     W -->|failed| Y[Wallet refunded]
@@ -382,7 +381,7 @@ For BWP / ZAR / ZMW, **full sender KYC** is always sent (Tier 0 reduced KYC does
 - Rate estimate — from `/business/rates` + business margin; **final rate locks on `submitSend`**
 - `reason`: `other` (send) or `bills` (invoice payment)
 - `destination.country`, `networkId` (auto-selected from active YC networks)
-- `forceAccept: true` + `acceptSend` fallback if still `created`/`pending`
+- `forceAccept: true` on `submitSend` — no separate accept step needed
 
 ### Send settlement & receipt
 

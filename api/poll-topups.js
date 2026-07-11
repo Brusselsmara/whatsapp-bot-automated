@@ -128,9 +128,10 @@ async function completeSend(txn, ycData) {
       const receiptUrl = `${base}/api/receipt?id=${row.id}`;
       const label = row.type === 'invoice_payment' ? 'Invoice payment' : 'Transfer';
       const displayAmount = row.payout_amount != null ? row.payout_amount : row.amount;
+      const displayCurrency = row.payout_currency || row.currency;
       try {
         await sendWhatsApp(row.phone,
-          `✅ *${label} confirmed!*\n\n*${displayAmount} ${row.currency}* sent to *${row.recipient_name}*.\n\nYour receipt is attached.`,
+          `✅ *${label} confirmed!*\n\n*${displayAmount} ${displayCurrency}* sent to *${row.recipient_name}*.\n\nYour receipt is attached.`,
           receiptUrl);
       } catch (e) {
         console.error(`[POLL] Receipt send failed for ${txn.id}:`, e.message);

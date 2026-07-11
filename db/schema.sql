@@ -39,6 +39,13 @@ alter table users add column if not exists kyc_email text;
 -- Per-business FX margin (default 2%; VIP corporate e.g. 0.01 = 1%)
 alter table users add column if not exists fx_margin_pct numeric(6,4) default 0.02;
 
+-- Home currency/country — derived automatically from the user's WhatsApp
+-- phone number's dial code (e.g. +267... => BWP/BW). Backfilled lazily by
+-- getOrCreateUser() for existing users too, so no manual migration needed.
+-- This is now the user's ONLY wallet currency (see WALLETS below).
+alter table users add column if not exists home_currency text;
+alter table users add column if not exists home_country text;
+
 -- ============================================================
 -- KYC SUBMISSIONS — one row per registration attempt, holds the
 -- document links and the approve/reject token you click in email
@@ -136,6 +143,19 @@ alter table transactions add column if not exists quote_id text;
 alter table transactions add column if not exists yc_rate numeric(18,6);
 alter table transactions add column if not exists display_rate numeric(18,6);
 alter table transactions add column if not exists quote_expires_at timestamptz;
+
+-- For a "send money" transaction, `currency`/`amount` ALWAYS refer to the
+-- sender's wallet (what's debited/refunded — this is what the settlement
+-- RPCs below operate on). `payout_currency` records what the recipient
+-- actually received when it differs from the wallet currency (cross-border
+-- sends, bridged through USD internally). Same-currency sends leave this
+-- null (payout_currency == currency in that case).
+alter table transactions add column if not exists payout_currency text;
+
+-- FX margin actually applied on a cross-border send, for audit/support —
+-- may differ from users.fx_margin_pct when the VIP corridor rule kicked in
+-- (business + BWP source + ZAR/SA destination + amount >= 500,000 BWP).
+alter table transactions add column if not exists margin_pct numeric(6,4);
 
 -- ============================================================
 -- ATOMIC SETTLEMENT RPCs (SELECT … FOR UPDATE — prevents double-credit)

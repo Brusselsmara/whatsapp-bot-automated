@@ -145,9 +145,10 @@ async function deliverReceipt(txn) {
   const receiptUrl = `${base}/api/receipt?id=${txn.id}`;
   const label = txn.type === 'invoice_payment' ? 'Invoice payment' : 'Transfer';
   const displayAmount = txn.payout_amount != null ? txn.payout_amount : txn.amount;
+  const displayCurrency = txn.payout_currency || txn.currency;
   try {
     await sendWhatsApp(txn.phone,
-      `✅ *${label} confirmed!*\n\n*${displayAmount} ${txn.currency}* sent to *${txn.recipient_name}*.\n\nYour receipt is attached.`,
+      `✅ *${label} confirmed!*\n\n*${displayAmount} ${displayCurrency}* sent to *${txn.recipient_name}*.\n\nYour receipt is attached.`,
       receiptUrl);
   } catch (e) {
     console.error(`[WEBHOOK] Receipt send failed for ${txn.id}:`, e.message);

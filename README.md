@@ -371,7 +371,7 @@ recipient gets ≈ amountEntered × displayRate
 
 `totalDebit = amountEntered + (ycFee × (1 + 0.07))`
 
-The rate/recipient-amount shown before confirm is an **unlocked estimate** (Yellow Card's `/business/rates`, no `quoteId`). The real, locked `getConversionQuote` (with a `quoteId` for `submitSend`) is only fetched **immediately before** debiting the wallet and submitting — this keeps the lock window as short as possible and avoids exposing a "quote expired, reply 1 to refresh" flow to the user for this workflow (Workflow 4 / invoice payments still use that live-quote-lock system, unchanged).
+The rate/recipient-amount shown before confirm is an **estimate from `/business/rates`** (with your FX margin applied). Yellow Card **locks the real payout rate on `submitSend`** (~10 minute window per their docs) — there is no separate `/business/quotes` endpoint in the public API. Workflow 4 (invoice payments) still shows a timed rate estimate before confirm; the final lock happens at `submitSend`.
 
 ### Yellow Card payload (sends)
 
@@ -379,7 +379,7 @@ For BWP / ZAR / ZMW, **full sender KYC** is always sent (Tier 0 reduced KYC does
 
 - `name`, `country`, `phone`, `address`, `dob`, `email`, `idNumber`, `idType` — `country`/`phone` always reflect the **sender's own home country**, even on cross-border sends where `destination.country` differs
 - `customerUID` (user’s phone digits)
-- `quoteId` — cross-border sends only, locked via `/business/quotes` right before submit; domestic sends omit it (no rate to lock)
+- Rate estimate — from `/business/rates` + business margin; **final rate locks on `submitSend`**
 - `reason`: `other` (send) or `bills` (invoice payment)
 - `destination.country`, `networkId` (auto-selected from active YC networks)
 - `forceAccept: true` + `acceptSend` fallback if still `created`/`pending`

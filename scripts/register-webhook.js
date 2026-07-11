@@ -12,11 +12,12 @@
  *      (If you don't have the `dotenv` package yet: npm install dotenv --save-dev)
  */
 const crypto = require('crypto');
+const { getPublicAppUrl } = require('../lib/app-url');
 
 const BASE_URL = process.env.YELLOWCARD_BASE_URL;
 const API_KEY = process.env.YELLOWCARD_API_KEY;
 const SECRET_KEY = process.env.YELLOWCARD_SECRET_KEY;
-const PUBLIC_APP_URL = process.env.PUBLIC_APP_URL;
+const PUBLIC_APP_URL = getPublicAppUrl();
 
 if (!BASE_URL || !API_KEY || !SECRET_KEY || !PUBLIC_APP_URL) {
   console.error('Missing one of YELLOWCARD_BASE_URL, YELLOWCARD_API_KEY, YELLOWCARD_SECRET_KEY, PUBLIC_APP_URL in your env.');

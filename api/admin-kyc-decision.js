@@ -1,5 +1,6 @@
 const { supabase } = require('../lib/db');
 const { sendWhatsApp } = require('../lib/twilio');
+const yc = require('../lib/yellowcard');
 
 module.exports = async (req, res) => {
   const { token, decision } = req.query;
@@ -36,29 +37,47 @@ module.exports = async (req, res) => {
     .update({ status: newStatus, decided_at: new Date().toISOString() })
     .eq('id', submission.id);
 
-  // Update user KYC status
+  // Update user KYC status (+ home currency from WhatsApp dial code when possible)
+  const detected = yc.detectCountryFromNumber(submission.phone);
   await supabase
     .from('users')
-    .update({ kyc_status: newStatus })
+    .update({
+      kyc_status: newStatus,
+      ...(detected && newStatus === 'approved'
+        ? { home_currency: detected.currency, home_country: detected.country }
+        : {}),
+    })
     .eq('phone', submission.phone);
 
-  // Create wallets for all supported currencies on approval
+  // Create only the user's single home-currency wallet on approval
   if (newStatus === 'approved') {
-    const currencies = ['BWP', 'ZAR', 'ZMW'];
-    for (const currency of currencies) {
-      await supabase
-        .from('wallets')
-        .upsert(
-          { phone: submission.phone, currency, balance: 0 },
-          { onConflict: 'phone,currency', ignoreDuplicates: true }
-        );
+    let homeCurrency = detected?.currency;
+    if (!homeCurrency) {
+      const { data: user } = await supabase
+        .from('users')
+        .select('home_currency')
+        .eq('phone', submission.phone)
+        .maybeSingle();
+      homeCurrency = user?.home_currency;
+    }
+    if (homeCurrency) {
+      await supabase.from('wallets').upsert(
+        { phone: submission.phone, currency: homeCurrency, balance: 0 },
+        { onConflict: 'phone,currency', ignoreDuplicates: true }
+      );
+      await supabase.from('wallets').delete()
+        .eq('phone', submission.phone)
+        .neq('currency', homeCurrency)
+        .eq('balance', 0);
+    } else {
+      console.warn(`[KYC] No home currency for ${submission.phone} — wallet will be created on first bot use`);
     }
   }
 
   // Notify user via WhatsApp
   const message =
     newStatus === 'approved'
-      ? `✅ *Great news — you're verified!*\n\nWelcome to *PayLink*! Your account is now active.\n\nReply *"menu"* to see what you can do.`
+      ? `✅ *Great news — you're verified!*\n\nWelcome to *PayLink*! Your account is now active${detected ? ` with a *${detected.currency}* wallet` : ''}.\n\nReply *"menu"* to see what you can do.`
       : `❌ *Unfortunately we couldn't verify your account.*\n\nYour submitted documents did not meet our verification requirements.\n\nIf you believe this is an error, please contact support or reply *"menu"* to start a new registration.`;
 
   try {
@@ -76,7 +95,7 @@ module.exports = async (req, res) => {
       </h2>
       <p><strong>${submission.phone}</strong> has been notified on WhatsApp.</p>
       ${newStatus === 'approved'
-        ? '<p>Their wallet has been created for BWP, ZAR, and ZMW.</p>'
+        ? `<p>Their ${detected ? detected.currency + ' home-currency' : ''} wallet has been created.</p>`
         : ''}
     </body>
     </html>

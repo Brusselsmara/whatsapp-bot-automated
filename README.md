@@ -583,7 +583,7 @@ See `.env.example` for the full list:
 | `CROSSBORDER_FX_MARGIN_PCT` / `CROSSBORDER_VIP_FX_MARGIN_PCT` | Cross-border FX margin, standard vs VIP corridor (default `0.02` / `0.01`) — also used to bridge cross-currency invoice payments (Workflow 4) back to the payer's wallet |
 | `CROSSBORDER_VIP_MIN_AMOUNT_BWP` | Minimum BWP amount for the VIP FX margin (default `500000`) |
 | `RESEND_API_KEY` / `RESEND_FROM_EMAIL` / `ADMIN_EMAIL` | KYC review emails |
-| `PUBLIC_APP_URL` | Webhooks, receipts, admin links |
+| `PUBLIC_APP_URL` | Deployment root URL only (e.g. `https://your-app.vercel.app`) — used for KYC email links, receipts, webhooks. **Not** the `/api/whatsapp` path |
 | `CRON_SECRET` | Protects `/api/poll-topups` |
 
 ---

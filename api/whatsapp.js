@@ -1,6 +1,7 @@
 const querystring = require('querystring');
 const twilio = require('twilio');
 const { handleIncomingMessage } = require('../lib/conversation');
+const { getPublicAppUrl } = require('../lib/app-url');
 
 // This is the URL you'll paste into Twilio's WhatsApp Sandbox / Sender config:
 //   https://<your-vercel-app>.vercel.app/api/whatsapp
@@ -17,7 +18,7 @@ function readRawBody(req) {
 }
 
 function webhookUrlCandidates(req) {
-  const baseUrl = (process.env.PUBLIC_APP_URL || '').replace(/\/$/, '');
+  const baseUrl = getPublicAppUrl();
   const host = req.headers['x-forwarded-host'] || req.headers.host;
   const proto = req.headers['x-forwarded-proto'] || 'https';
   const path = '/api/whatsapp';

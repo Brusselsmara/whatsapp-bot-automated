@@ -8,6 +8,7 @@ const {
   claimReceiptSent,
   markTopupFailed,
 } = require('../lib/settlement');
+const { getPublicAppUrl } = require('../lib/app-url');
 
 module.exports.config = { api: { bodyParser: false } };
 
@@ -141,7 +142,7 @@ async function handleSendUpdate(txn, status, event) {
 }
 
 async function deliverReceipt(txn) {
-  const base = (process.env.PUBLIC_APP_URL || '').replace(/\/$/, '');
+  const base = getPublicAppUrl();
   const receiptUrl = `${base}/api/receipt?id=${txn.id}`;
   const label = txn.type === 'invoice_payment' ? 'Invoice payment' : 'Transfer';
   const displayAmount = txn.payout_amount != null ? txn.payout_amount : txn.amount;

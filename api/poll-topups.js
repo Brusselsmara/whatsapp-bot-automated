@@ -8,6 +8,7 @@ const {
   claimReceiptSent,
   markTopupFailed,
 } = require('../lib/settlement');
+const { getPublicAppUrl } = require('../lib/app-url');
 
 /**
  * GET /api/poll-topups
@@ -124,7 +125,7 @@ async function completeSend(txn, ycData) {
     if (receiptClaim.claimed) {
       const { data: fresh } = await supabase.from('transactions').select('*').eq('id', txn.id).single();
       const row = fresh || txn;
-      const base = (process.env.PUBLIC_APP_URL || '').replace(/\/$/, '');
+      const base = getPublicAppUrl();
       const receiptUrl = `${base}/api/receipt?id=${row.id}`;
       const label = row.type === 'invoice_payment' ? 'Invoice payment' : 'Transfer';
       const displayAmount = row.payout_amount != null ? row.payout_amount : row.amount;

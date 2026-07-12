@@ -519,10 +519,10 @@ Per [YC Sandbox Testing](https://docs.yellowcard.engineering/docs/sandbox-testin
 | Mobile money | `+{countryCode}1111111111` | `+{countryCode}0000000000` |
 
 **Botswana momo success:** `+2671111111111`  
-**South Africa bank success:** `1111111111`  
+**Botswana / South Africa bank success:** `1111111111` — the bot injects this automatically on sandbox bank top-ups (no manual transfer needed)  
 **Zambia momo success:** `+2601111111111`
 
-Real phone numbers in sandbox may stay **pending** indefinitely.
+Real phone numbers in sandbox may stay **pending** indefinitely. Production bank top-ups still require a real transfer to the `bankInfo` account YC returns.
 
 ---
 

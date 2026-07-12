@@ -8,6 +8,7 @@ const {
   markTopupFailed,
 } = require('../lib/settlement');
 const { deliverSendReceipt } = require('../lib/receipt-delivery');
+const { formatTopupSettlementMessage } = require('../lib/quotes');
 
 module.exports.config = { api: { bodyParser: false } };
 
@@ -83,9 +84,15 @@ async function handleTopupUpdate(txn, status, event) {
         console.warn(`[WEBHOOK] topup ${txn.id} RECEIVE.COMPLETE but claimed=false — check wallet_credited / run db/schema.sql`);
         return;
       }
-      console.log(`[WEBHOOK] ✅ Topup credited ${result.amount} ${result.currency} — balance ${result.newBalance}`);
+      console.log(`[WEBHOOK] ✅ Topup credited ${result.netAmount} ${result.currency} (gross ${result.amount}, fee ${result.feeAmount}) — balance ${result.newBalance}`);
       await sendWhatsApp(result.phone,
-        `✅ Top-up of *${result.amount} ${result.currency}* confirmed!\n\nNew balance: *${result.newBalance} ${result.currency}*`);
+        formatTopupSettlementMessage({
+          grossAmount: result.amount,
+          netAmount: result.netAmount,
+          feeAmount: result.feeAmount,
+          currency: result.currency,
+          newBalance: result.newBalance,
+        }));
     } catch (err) {
       console.error(`[WEBHOOK] claim_topup_credit failed for ${txn.id}:`, err.message);
       throw err;

@@ -8,6 +8,7 @@ const {
   markTopupFailed,
 } = require('../lib/settlement');
 const { deliverSendReceipt, SEND_COMPLETE } = require('../lib/receipt-delivery');
+const { formatTopupSettlementMessage } = require('../lib/quotes');
 
 /**
  * GET /api/poll-topups
@@ -130,9 +131,15 @@ async function creditWallet(txn, ycData) {
       return 'already_completed';
     }
 
-    console.log(`[POLL] ✅ Credited ${result.amount} ${result.currency} — balance ${result.newBalance}`);
+    console.log(`[POLL] ✅ Credited ${result.netAmount} ${result.currency} (gross ${result.amount}, fee ${result.feeAmount}) — balance ${result.newBalance}`);
     await sendWhatsApp(result.phone,
-      `✅ Top-up confirmed!\n\n*${result.amount} ${result.currency}* added to your wallet.\nNew balance: *${result.newBalance} ${result.currency}*\n\nReply *menu* to continue.`);
+      `${formatTopupSettlementMessage({
+        grossAmount: result.amount,
+        netAmount: result.netAmount,
+        feeAmount: result.feeAmount,
+        currency: result.currency,
+        newBalance: result.newBalance,
+      })}\n\nReply *menu* to continue.`);
 
     return `credited: ${result.newBalance}`;
   } catch (err) {

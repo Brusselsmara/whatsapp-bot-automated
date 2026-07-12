@@ -163,13 +163,15 @@ alter table transactions add column if not exists margin_pct numeric(6,4);
 -- ============================================================
 
 create or replace function claim_topup_credit(p_txn_id uuid, p_yc_response jsonb)
-returns table(claimed boolean, phone text, currency text, amount numeric, new_balance numeric)
+returns table(claimed boolean, phone text, currency text, amount numeric, net_amount numeric, fee_amount numeric, new_balance numeric)
 language plpgsql
 as $$
 #variable_conflict use_column
 declare
   v transactions%rowtype;
   v_new_balance numeric;
+  v_fee numeric;
+  v_net numeric;
 begin
   select * into v from transactions where id = p_txn_id for update;
 
@@ -177,9 +179,12 @@ begin
      or v.type <> 'topup'
      or v.wallet_credited
      or v.status = 'failed' then
-    return query select false, null::text, null::text, null::numeric, null::numeric;
+    return query select false, null::text, null::text, null::numeric, null::numeric, null::numeric, null::numeric;
     return;
   end if;
+
+  v_fee := coalesce(v.yc_fee_amount, 0) + coalesce(v.markup_amount, 0);
+  v_net := greatest(v.amount - v_fee, 0);
 
   update transactions
   set status = 'completed',
@@ -189,13 +194,13 @@ begin
   where id = p_txn_id;
 
   insert into wallets (phone, currency, balance, updated_at)
-  values (v.phone, v.currency, v.amount, now())
+  values (v.phone, v.currency, v_net, now())
   on conflict (phone, currency) do update
   set balance = wallets.balance + excluded.balance,
       updated_at = now()
   returning wallets.balance into v_new_balance;
 
-  return query select true, v.phone, v.currency, v.amount, v_new_balance;
+  return query select true, v.phone, v.currency, v.amount, v_net, v_fee, v_new_balance;
 end;
 $$;
 

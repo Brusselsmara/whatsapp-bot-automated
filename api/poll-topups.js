@@ -175,7 +175,8 @@ async function completeSend(txn, ycData) {
   }
 
   if (result.receiptPending) {
-    const r = await deliverSendReceipt(txn);
+    const { data: fresh } = await supabase.from('transactions').select('*').eq('id', txn.id).single();
+    const r = await deliverSendReceipt(fresh || txn);
     if (!r.sent) return `notify_failed: ${r.reason}`;
   }
 

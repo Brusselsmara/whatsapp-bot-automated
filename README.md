@@ -291,7 +291,7 @@ flowchart TD
     H2 -->|confirmed| H[Amount]
     H --> I{Same currency as sender's wallet?}
     I -->|yes, domestic| J[YC send fee × markup]
-    I -->|no, cross-border| K[Bridge via USD · FX margin · flat fee]
+    I -->|no, cross-border| K[Bridge via USD · FX margin · dest fee + markup]
     J --> L{Sufficient balance incl. fee?}
     K --> L
     L -->|no| M[Prompt to top up]
@@ -319,7 +319,7 @@ flowchart TD
 | 3b | Bank account number | Currency still asked manually (bank numbers carry no dial code) |
 | 4 | — | **Recipient identity resolved** (bank via Yellow Card; manual confirm for momo — see below). Bot shows the name and asks `1` Yes / `2` No before continuing. |
 | 5 | Amount | Computed in the **sender's wallet currency** |
-| 6 | — | Domestic → YC fee + flat markup. Cross-border → bridged FX estimate + flat fee. Balance checked incl. fees. |
+| 6 | — | Domestic → YC fee + tiered markup. Cross-border → YC destination-leg fee (converted to wallet) + 15% markup, plus bridged FX with 2% margin. Balance checked incl. fees. |
 | 7 | `confirm` | Debits wallet; cross-border sends lock a fresh live quote right before `submitSend` |
 | 8 | — | User told payout is processing; receipt follows |
 
@@ -364,11 +364,15 @@ recipient gets ≈ amountEntered × displayRate
 
 | Component | Calculation | Env var |
 |-----------|-------------|---------|
-| **Cross-border fee** | YC's send fee, looked up (and paid) in the **sender's home currency**, marked up by a flat **7%** | `CROSSBORDER_FEE_MARKUP_PCT` |
-| **FX margin** | 2% shaved off the bridged rate (in PayLink's favour) | `CROSSBORDER_FX_MARGIN_PCT` |
+| **Cross-border fee** | YC disbursement fee on the **destination** leg (`getFeeConfig` for recipient country/currency/payout amount), converted to the sender's wallet currency, then marked up **15%** | `CROSSBORDER_FEE_MARKUP_PCT` (default `0.15`) |
+| **FX rate** | YC `/business/rates` bridged via USD, with **2%** margin shaved off (`displayRate = bridgedRate × 0.98`) | `CROSSBORDER_FX_MARGIN_PCT` |
 | **VIP FX margin** | 1% instead of 2%, for **business** accounts sending **BWP → South Africa (ZAR)** of at least **500,000 BWP** | `CROSSBORDER_VIP_FX_MARGIN_PCT` / `CROSSBORDER_VIP_MIN_AMOUNT_BWP` |
 
-`totalDebit = amountEntered + (ycFee × (1 + 0.07))`
+```
+ycFeeWallet = ycFeeDest / displayRate          ← YC fee on destination payout, in sender's wallet currency
+markup      = ycFeeWallet × CROSSBORDER_FEE_MARKUP_PCT   (default 15%)
+totalDebit  = amountEntered + ycFeeWallet + markup
+```
 
 The rate/recipient-amount shown before confirm is an **estimate from `/business/rates`** (with your FX margin applied). Yellow Card **locks the real payout rate on `submitSend`** (~10 minute window per their docs) — there is no separate `/business/quotes` endpoint in the public API. Workflow 4 (invoice payments) still shows a timed rate estimate before confirm; the final lock happens at `submitSend`.
 
@@ -578,7 +582,7 @@ See `.env.example` for the full list:
 | `POBO_FLAT_FEE_USD` / `POBO_FEE_PCT` / `INVOICE_PROFIT_MARKUP_PCT` | Invoice payment fee quote (Workflow 4, unchanged) |
 | `FX_RATE_MULTIPLIER_BASE` / `QUOTE_LOCK_MINUTES` | Invoice payment live-quote margin/lock display (Workflow 4 only) |
 | `DOMESTIC_FEE_FLAT_AMOUNT` / `DOMESTIC_FEE_FLAT_THRESHOLD` / `DOMESTIC_FEE_PCT_ABOVE_THRESHOLD` | Domestic send fee markup, tiered (default `5` / `500` / `0.01`) — same for bank and momo |
-| `CROSSBORDER_FEE_MARKUP_PCT` | Cross-border flat fee markup on YC's fee (default `0.07`) |
+| `CROSSBORDER_FEE_MARKUP_PCT` | Cross-border fee markup on YC's destination-leg fee, in wallet currency (default `0.15`) |
 | `CROSSBORDER_FX_MARGIN_PCT` / `CROSSBORDER_VIP_FX_MARGIN_PCT` | Cross-border FX margin, standard vs VIP corridor (default `0.02` / `0.01`) — also used to bridge cross-currency invoice payments (Workflow 4) back to the payer's wallet |
 | `CROSSBORDER_VIP_MIN_AMOUNT_BWP` | Minimum BWP amount for the VIP FX margin (default `500000`) |
 | `RESEND_API_KEY` / `RESEND_FROM_EMAIL` / `ADMIN_EMAIL` | KYC review emails |

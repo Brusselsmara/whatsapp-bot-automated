@@ -12,7 +12,7 @@
  *      (If you don't have the `dotenv` package yet: npm install dotenv --save-dev)
  */
 const crypto = require('crypto');
-const { getPublicAppUrl } = require('../lib/app-url');
+const { getPublicAppUrl, publicAppUrl } = require('../lib/app-url');
 
 const BASE_URL = process.env.YELLOWCARD_BASE_URL;
 const API_KEY = process.env.YELLOWCARD_API_KEY;
@@ -45,7 +45,7 @@ function buildAuthHeaders(path, method, body) {
 async function main() {
   const path = '/business/webhooks';
   const body = {
-    url: `${PUBLIC_APP_URL}/api/yellowcard-webhook`,
+    url: publicAppUrl('/api/yellowcard-webhook'),
     // No "state" field = subscribe to ALL events, simplest for getting started.
     active: true,
   };

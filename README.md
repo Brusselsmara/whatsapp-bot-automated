@@ -2,7 +2,7 @@
 
 PayLink is a WhatsApp bot that lets individuals and businesses register, verify their identity, fund an internal wallet, and send money or pay invoices to bank accounts and mobile money wallets across **Botswana (BWP)**, **South Africa (ZAR)**, and **Zambia (ZMW)**.
 
-Each user has exactly **one wallet**, in their **home currency** — auto-detected from the country code of the WhatsApp number they registered with (e.g. `+267…` → BWP). Top-ups always fund that one wallet. Sending money to a recipient in a *different* currency (a cross-border send) is fully supported — the bot bridges the conversion internally (via USD) and shows the sender the exchange rate, fee, and total cost before they confirm; the recipient never sees or needs a foreign-currency wallet.
+Each user has exactly **one wallet**, in their **home currency** — usually auto-detected from the WhatsApp number's dial code (e.g. `+267…` → BWP). If the number isn't from Botswana, South Africa, or Zambia (e.g. a UK `+44` test line), the user **chooses** their wallet currency at registration and is told that all top-ups and payments will be in that currency. Top-ups always fund that one wallet. Sending money to a recipient in a *different* currency (a cross-border send) is fully supported — the bot bridges the conversion internally (via USD) and shows the sender the exchange rate, fee, and total cost before they confirm; the recipient never sees or needs a foreign-currency wallet.
 
 Built with **Twilio WhatsApp** + **Node.js on Vercel** + **Supabase Postgres** + **Yellow Card** (fiat settlement).
 
@@ -600,7 +600,7 @@ See `.env.example` for the full list:
 
 | Table | Purpose |
 |-------|---------|
-| `users` | One row per WhatsApp phone; KYC fields; `account_type`; `kyc_status`; `home_currency` / `home_country` (auto-detected from phone, backfilled lazily); `fx_margin_pct` (invoice payments only) |
+| `users` | One row per WhatsApp phone; KYC fields; `account_type`; `kyc_status`; `home_currency` / `home_country` (auto-detected from supported dial codes, or user-selected at registration); `fx_margin_pct` (invoice payments only) |
 | `kyc_submissions` | Document URLs, approval token, admin decisions |
 | `sessions` | Conversation state machine (`state` + `context` JSON) |
 | `wallets` | Balance per user per currency — in practice always exactly one row (the user's `home_currency`) |

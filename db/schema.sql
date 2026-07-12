@@ -162,6 +162,9 @@ alter table transactions add column if not exists margin_pct numeric(6,4);
 -- Run this block in Supabase SQL editor after the columns above exist.
 -- ============================================================
 
+-- Return type changed (added net_amount, fee_amount) — must drop before replace.
+drop function if exists claim_topup_credit(uuid, jsonb);
+
 create or replace function claim_topup_credit(p_txn_id uuid, p_yc_response jsonb)
 returns table(claimed boolean, phone text, currency text, amount numeric, net_amount numeric, fee_amount numeric, new_balance numeric)
 language plpgsql

@@ -2,7 +2,7 @@
 
 PayLink is a WhatsApp bot that lets individuals and businesses register, verify their identity, fund an internal wallet, and send money or pay invoices to bank accounts and mobile money wallets across **Botswana (BWP)**, **South Africa (ZAR)**, and **Zambia (ZMW)**.
 
-Each user has exactly **one wallet**, in their **home currency** — usually auto-detected from the WhatsApp number's dial code (e.g. `+267…` → BWP). If the number isn't from Botswana, South Africa, or Zambia (e.g. a UK `+44` test line), the user **chooses** their wallet currency at registration and is told that all top-ups and payments will be in that currency. Top-ups always fund that one wallet. Sending money to a recipient in a *different* currency (a cross-border send) is fully supported — the bot bridges the conversion internally (via USD) and shows the sender the exchange rate, fee, and total cost before they confirm; the recipient never sees or needs a foreign-currency wallet.
+Each user has exactly **one wallet**, in their **home currency** — auto-detected from the WhatsApp number's dial code (`+267…` → BWP, `+27…` → ZAR, `+260…` → ZMW). **Only these country codes can register**; numbers from other countries (e.g. UK `+44`) are blocked with a message listing the accepted codes. Top-ups always fund that one wallet. Sending money to a recipient in a *different* currency (a cross-border send) is fully supported — the bot bridges the conversion internally (via USD) and shows the sender the exchange rate, fee, and total cost before they confirm; the recipient never sees or needs a foreign-currency wallet.
 
 Built with **Twilio WhatsApp** + **Node.js on Vercel** + **Supabase Postgres** + **Yellow Card** (fiat settlement).
 
@@ -165,6 +165,8 @@ Reply **hi**, **hello**, **menu**, or **start** anytime to return to the main me
 ---
 
 ## Workflow 1 — Customer registration (Individual & Business)
+
+Registration is **only** open to WhatsApp numbers from **Botswana (+267)**, **South Africa (+27)**, or **Zambia (+260)**. Any other dial code (e.g. UK `+44`, US `+1`) receives a message listing the accepted country codes and cannot proceed. Existing registrations on unsupported numbers are reset to `unregistered` (run the migration at the end of `db/schema.sql`, or let the bot de-register lazily on the next message).
 
 Both account types follow the same steps after choosing account type. Businesses collect one extra field (business name) and require more documents.
 
@@ -600,7 +602,7 @@ See `.env.example` for the full list:
 
 | Table | Purpose |
 |-------|---------|
-| `users` | One row per WhatsApp phone; KYC fields; `account_type`; `kyc_status`; `home_currency` / `home_country` (auto-detected from supported dial codes, or user-selected at registration); `fx_margin_pct` (invoice payments only) |
+| `users` | One row per WhatsApp phone; KYC fields; `account_type`; `kyc_status`; `home_currency` / `home_country` (auto-detected from supported dial codes +267 / +27 / +260 only); `fx_margin_pct` (invoice payments only) |
 | `kyc_submissions` | Document URLs, approval token, admin decisions |
 | `sessions` | Conversation state machine (`state` + `context` JSON) |
 | `wallets` | Balance per user per currency — in practice always exactly one row (the user's `home_currency`) |

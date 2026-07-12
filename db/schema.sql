@@ -40,9 +40,8 @@ alter table users add column if not exists kyc_email text;
 alter table users add column if not exists fx_margin_pct numeric(6,4) default 0.02;
 
 -- Home currency/country — derived automatically from the user's WhatsApp
--- phone number's dial code (e.g. +267... => BWP/BW). Backfilled lazily by
--- getOrCreateUser() for existing users too, so no manual migration needed.
--- This is now the user's ONLY wallet currency (see WALLETS below).
+-- phone number's dial code (+267/BWP, +27/ZAR, +260/ZMW only). Unsupported
+-- dial codes cannot register; see de-register block at end of this file.
 alter table users add column if not exists home_currency text;
 alter table users add column if not exists home_country text;
 
@@ -331,3 +330,49 @@ alter table kyc_submissions add column if not exists resubmission_count integer 
 -- Persist the admin's note when requesting more info, so there's a
 -- record of what was asked for even after a new submission row is created
 alter table kyc_submissions add column if not exists note text;
+
+-- ============================================================
+-- De-register unsupported WhatsApp numbers (not BW / ZA / ZM dial codes)
+-- Mirrors detectCountryFromNumber() in lib/yellowcard.js — safe to re-run.
+-- ============================================================
+update users
+set
+  kyc_status = 'unregistered',
+  kyc_name = null,
+  kyc_dob = null,
+  kyc_address = null,
+  kyc_id_type = null,
+  kyc_id_number = null,
+  kyc_email = null,
+  home_currency = null,
+  home_country = null,
+  business_name = null,
+  account_type = 'individual'
+where not (
+  regexp_replace(phone, '\D', '', 'g') ~ '^267'
+  or regexp_replace(phone, '\D', '', 'g') ~ '^260'
+  or (
+    regexp_replace(phone, '\D', '', 'g') ~ '^27'
+    and regexp_replace(phone, '\D', '', 'g') !~ '^267'
+    and regexp_replace(phone, '\D', '', 'g') !~ '^260'
+  )
+)
+and (
+  kyc_status <> 'unregistered'
+  or kyc_name is not null
+  or home_currency is not null
+);
+
+delete from sessions
+where phone in (
+  select phone from users
+  where not (
+    regexp_replace(phone, '\D', '', 'g') ~ '^267'
+    or regexp_replace(phone, '\D', '', 'g') ~ '^260'
+    or (
+      regexp_replace(phone, '\D', '', 'g') ~ '^27'
+      and regexp_replace(phone, '\D', '', 'g') !~ '^267'
+      and regexp_replace(phone, '\D', '', 'g') !~ '^260'
+    )
+  )
+);

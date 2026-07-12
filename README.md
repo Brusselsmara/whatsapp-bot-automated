@@ -328,7 +328,7 @@ flowchart TD
 | 3b | Bank account number | Currency still asked manually (bank numbers carry no dial code) |
 | 4 | — | **Recipient identity resolved** (bank via Yellow Card; manual confirm for momo — see below). Bot shows the name and asks `1` Yes / `2` No before continuing. |
 | 5 | Amount | Computed in the **sender's wallet currency** |
-| 6 | — | Domestic → YC fee + tiered markup. Cross-border → YC destination-leg fee (converted to wallet) + 15% markup, plus bridged FX with 2% margin. Balance checked incl. fees. |
+| 6 | — | Domestic → YC fee + tiered markup added on top. Cross-border → user enters **total wallet debit (fees included)**; bot solves payout from YC destination-leg fee + 15% markup and bridged FX with 2% margin. |
 | 7 | `confirm` | Debits wallet; cross-border sends lock a fresh live quote right before `submitSend` |
 | 8 | — | User told payout is processing; receipt follows |
 
@@ -363,12 +363,11 @@ Example (defaults): a 1,000 BWP domestic send → markup = `5 + 1% × (1000 − 
 
 ### Cross-border sends (different currency in and out)
 
-The recipient's currency is auto-detected from their momo number (bank cross-border isn't currently exposed — currency is manually picked and validated against the channel, same as before). The sender is never shown or asked about a foreign-currency wallet — the conversion is bridged internally through each currency's USD rate:
+The recipient's currency is auto-detected from their momo number (bank cross-border isn't currently exposed — currency is manually picked and validated against the channel, same as before). The sender enters the **total wallet debit** — **fees are included** in that amount (not added on top). The bot solves iteratively how much of that total funds the FX conversion vs fees:
 
 ```
-bridgedRate  = (destCurrency per USD) / (sourceCurrency per USD)
-displayRate  = bridgedRate × (1 − marginPct)
-recipient gets ≈ amountEntered × displayRate
+principalFx = totalEntered − (ycFeeWallet + markup)
+recipient gets ≈ principalFx × displayRate
 ```
 
 | Component | Calculation | Env var |
@@ -377,11 +376,7 @@ recipient gets ≈ amountEntered × displayRate
 | **FX rate** | YC `/business/rates` bridged via USD, with **2%** margin shaved off (`displayRate = bridgedRate × 0.98`) | `CROSSBORDER_FX_MARGIN_PCT` |
 | **VIP FX margin** | 1% instead of 2%, for **business** accounts sending **BWP → South Africa (ZAR)** of at least **500,000 BWP** | `CROSSBORDER_VIP_FX_MARGIN_PCT` / `CROSSBORDER_VIP_MIN_AMOUNT_BWP` |
 
-```
-ycFeeWallet = ycFeeDest / displayRate          ← YC fee on destination payout, in sender's wallet currency
-markup      = ycFeeWallet × CROSSBORDER_FEE_MARKUP_PCT   (default 15%)
-totalDebit  = amountEntered + ycFeeWallet + markup
-```
+Example: user enters **1,000 BWP** total (fees included) → ~**17 BWP** fee deducted internally → ~**983 BWP** converted → recipient gets ≈ **1,293 ZMW** at rate 1.3157.
 
 The rate/recipient-amount shown before confirm is an **estimate from `/business/rates`** (with your FX margin applied). Yellow Card **locks the real payout rate on `submitSend`** (~10 minute window per their docs) — there is no separate `/business/quotes` endpoint in the public API. Workflow 4 (invoice payments) still shows a timed rate estimate before confirm; the final lock happens at `submitSend`.
 

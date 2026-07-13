@@ -58,7 +58,7 @@ Twilio WhatsApp API  ──►  /api/whatsapp.js
 |----------|---------|
 | `POST /api/whatsapp` | Incoming Twilio messages (text + media) |
 | `POST /api/yellowcard-webhook` | Yellow Card payment status events |
-| `GET /api/poll-topups` | Cron poller for all pending transactions |
+| `GET /api/poll-transactions` | Cron poller — pending top-ups, sends, invoice payments, and PDF receipts (`/api/poll-topups` alias) |
 | `GET /api/receipt?id=` | PDF remittance receipt (completed sends only) |
 | `GET /api/admin-kyc-decision` | Approve or reject registration (email link) |
 | `GET/POST /api/admin-kyc-request-info` | Request more KYC documents (email link) |
@@ -311,7 +311,7 @@ Settlement uses **atomic Postgres RPCs** (`lib/settlement.js`) so webhook + cron
 
 1. **Yellow Card webhook** (`RECEIVE.COMPLETE`) — primary
 2. **Per-message poll** — `settlePending()` at the start of every incoming message
-3. **Cron poller** — `GET /api/poll-topups?secret=…` every 2–5 minutes
+3. **Cron poller** — `GET /api/poll-transactions?secret=…` every 2–5 minutes
 4. **Immediate poll** — right after `submitReceive` returns
 
 Only the first successful `claim_topup_credit` call credits the wallet.
@@ -439,6 +439,17 @@ When Yellow Card marks the send **complete**:
 4. `receipt_sent` flag set (prevents duplicates)
 
 If send **fails** → wallet amount refunded, user notified.
+
+### Send / payment settlement paths
+
+Settlement uses the same atomic RPCs as top-ups (`claim_send_complete`, `claim_send_refund`, `claim_receipt_sent`):
+
+1. **Yellow Card webhook** (`SEND.COMPLETE` / payment events) — primary
+2. **Per-message poll** — `settlePending()` at the start of every inbound WhatsApp message (that user only)
+3. **Cron poller** — `GET /api/poll-transactions?secret=…` every 2–5 minutes (**all users**)
+4. **Immediate poll** — right after `submitSend` returns
+
+The cron poller is what delivers the **PDF receipt automatically** when a payout completes and the customer does not send another message. It also recovers stuck receipts (`status = completed`, `receipt_sent = false`).
 
 ---
 
@@ -619,26 +630,37 @@ Real phone numbers in sandbox may stay **pending** indefinitely. Production bank
 3. Set `PUBLIC_APP_URL` to your Vercel URL (no trailing slash) and redeploy
 4. Configure Twilio and YC webhooks with the live URL
 
-### 6. Cron poller (recommended)
+### 6. Cron poller (required for automatic PDF receipts)
 
-Vercel **free tier has no built-in cron**. Use an external scheduler to hit this endpoint every 2–5 minutes:
+Vercel **free tier has no built-in cron**. Use **one** external cron job (not separate jobs for top-ups vs payments) to hit this endpoint every 2–5 minutes:
 
 ```
-https://<your-app>.vercel.app/api/poll-topups?secret=<CRON_SECRET>
+https://<your-app>.vercel.app/api/poll-transactions?secret=<CRON_SECRET>
 ```
+
+(`/api/poll-topups` is the same handler — use either URL.)
 
 Or send header `x-cron-secret: <CRON_SECRET>` (no secret in URL).
+
+**What this single cron job does:**
+
+| Pending state | Action |
+|---------------|--------|
+| Top-up not yet credited | Poll YC → credit wallet → WhatsApp confirmation |
+| Send / invoice payment still processing | Poll YC → mark complete or refund wallet |
+| Send completed but no PDF yet (`receipt_sent = false`) | Generate signed receipt URL → WhatsApp message + PDF attachment |
+
+Without this cron, customers who initiate a send or invoice payment and then **do not message again** may not receive their PDF receipt until they return (webhooks and per-message polling only run when something else triggers the app).
 
 #### cron-job.org setup (free)
 
 1. Generate a secret: `openssl rand -hex 32`
 2. Add `CRON_SECRET` in Vercel → Settings → Environment Variables → **Production**, then **redeploy**
-3. Test in browser: `https://<your-app>.vercel.app/api/poll-topups?secret=<CRON_SECRET>` → expect `{"polled":0,"message":"Nothing pending"}`
+3. Test in browser: `https://<your-app>.vercel.app/api/poll-transactions?secret=<CRON_SECRET>` → expect `{"polled":0,"message":"Nothing pending"}`
 4. Sign up at [cron-job.org](https://cron-job.org) → **Create cronjob**
-5. URL: your poll-topups URL above; method **GET**; schedule **every 5 minutes**; timeout **60s**
+5. URL: your `poll-transactions` URL above; method **GET**; schedule **every 5 minutes**; timeout **60s**
 6. Run once manually → confirm HTTP **200** in execution history; check Vercel function logs for `[POLL]`
-
-This poller is a safety net — webhooks and per-message settlement handle most cases. Without cron, users who top up and never message again may wait until they return.
+7. After a test send completes on YC sandbox, wait for the next cron run → logs should show `send_completed` or `receipt_sent`
 
 ---
 
@@ -658,7 +680,7 @@ See `.env.example` for the full list:
 | `TOPUP_FLAT_FEE_BWP` / `TOPUP_YC_FEE_MULTIPLIER` | Top-up fee: BWP flat + multiplier on YC collection fee (default `10` / `1.2`) — deducted from wallet credit on completion |
 | `RESEND_API_KEY` / `RESEND_FROM_EMAIL` / `ADMIN_EMAIL` | KYC review emails |
 | `PUBLIC_APP_URL` | Deployment root URL only (e.g. `https://your-app.vercel.app`) — used for KYC email links, receipts, webhooks. **Not** the `/api/whatsapp` path |
-| `CRON_SECRET` | Protects `/api/poll-topups` (**required in production**) |
+| `CRON_SECRET` | Protects `/api/poll-transactions` (**required in production**) |
 | `RECEIPT_SIGNING_SECRET` | HMAC secret for signed PDF receipt URLs (**recommended in production**; falls back to `CRON_SECRET`) |
 | `SENTRY_DSN` | Optional Sentry DSN for production error alerts |
 
@@ -743,7 +765,7 @@ Run this matrix on **production Yellow Card** before go-live (not sandbox):
 | 4 | Cross-border send (BWP→ZAR momo) | FX rate + all-in fee; recipient amount on receipt |
 | 5 | Cross-currency invoice (BWP wallet → ZAR invoice) | Bank resolve returns name; no `destination name` error; fees match quote |
 | 6 | Failed send | Wallet refunded; no duplicate receipt |
-| 7 | Cron poller | `/api/poll-topups` rejects without `CRON_SECRET`; completes stuck sends |
+| 7 | Cron poller | `/api/poll-transactions` rejects without `CRON_SECRET`; completes stuck sends and delivers PDF receipts |
 | 8 | RLS | Anon key cannot read `wallets` / `transactions` |
 
 ---

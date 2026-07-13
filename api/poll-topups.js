@@ -12,9 +12,14 @@ const { formatTopupSettlementMessage } = require('../lib/quotes');
 const { captureError } = require('../lib/observability');
 
 /**
- * GET /api/poll-topups
- * Polls Yellow Card for all unsettled topups and sends across ALL users.
- * Protected by CRON_SECRET env var.
+ * GET /api/poll-topups  (alias: /api/poll-transactions)
+ *
+ * Cron safety net for ALL users — no inbound WhatsApp message required:
+ * - Pending top-ups → credit wallet + notify
+ * - Pending sends / invoice payments → mark complete or refund
+ * - Completed sends with receipt_sent=false → deliver PDF receipt via WhatsApp
+ *
+ * Protected by CRON_SECRET env var. Schedule every 2–5 min via cron-job.org.
  */
 module.exports = async (req, res) => {
   if (req.method !== 'GET' && req.method !== 'POST') {

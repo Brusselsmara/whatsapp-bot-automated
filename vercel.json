@@ -3,6 +3,7 @@
     "api/whatsapp.js":              { "maxDuration": 30 },
     "api/yellowcard-webhook.js":    { "maxDuration": 30 },
     "api/poll-topups.js":           { "maxDuration": 60 },
+    "api/poll-transactions.js":     { "maxDuration": 60 },
     "api/receipt.js":               { "maxDuration": 15 },
     "api/admin-kyc-decision.js":    { "maxDuration": 10 },
     "api/admin-kyc-request-info.js":{ "maxDuration": 10 }

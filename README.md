@@ -330,7 +330,7 @@ flowchart TD
 | 3b | Bank account number | Currency still asked manually (bank numbers carry no dial code) |
 | 4 | — | **Recipient identity resolved** (bank via Yellow Card; manual confirm for momo — see below). Bot shows the name and asks `1` Yes / `2` No before continuing. |
 | 5 | Amount | Computed in the **sender's wallet currency** |
-| 6 | — | Domestic → YC fee + tiered markup added on top. Cross-border → user enters **total wallet debit (fees included)**; bot solves payout from YC destination-leg fee + 15% markup and bridged FX with 2% margin. |
+| 6 | — | Domestic → YC fee + tiered PayLink markup. Cross-border → user enters **total wallet debit (fees included)**; bot solves payout from YC destination-leg fee + tiered markup and bridged FX with 2% margin. |
 | 7 | `confirm` | Debits wallet; cross-border sends lock a fresh live quote right before `submitSend` |
 | 8 | — | User told payout is processing; receipt follows |
 
@@ -345,23 +345,24 @@ Before any amount is even asked, the bot resolves and confirms who the money is 
 
 ### Domestic sends (same currency in and out)
 
-No FX conversion — the recipient receives exactly the amount entered. The fee is Yellow Card's own send fee (`getFeeConfig`) plus a **tiered markup** — the same formula for both bank and mobile money — shown to the user as a **single combined total** (the YC/markup split is never shown):
+No FX conversion — the recipient receives exactly the amount entered. The fee is Yellow Card's disbursement fee (`getFeeConfig`) plus PayLink's **tiered BWP flat fee** (converted to the send currency when needed) and **50% markup on the YC fee** — shown as a **single combined total**:
 
-| Amount | Markup (added on top of YC's own fee) | Env var |
-|--------|----------------------------------------|---------|
-| ≤ `DOMESTIC_FEE_FLAT_THRESHOLD` (500) | Flat `DOMESTIC_FEE_FLAT_AMOUNT` (5) | — |
-| > threshold | Flat amount **+** `DOMESTIC_FEE_PCT_ABOVE_THRESHOLD` (1%) × (amount − threshold) | — |
-
-The flat amount and threshold are literal numbers in whatever currency the send itself is in (BWP, ZAR, or ZMW) — they are **not** FX-converted per currency.
+| Transaction size (BWP equivalent) | PayLink flat fee |
+|----------------------------------|------------------|
+| ≤ 500 | BWP 5 |
+| 501 – 2,000 | BWP 15 |
+| 2,001 – 5,000 | BWP 25 |
+| 5,001 – 25,000 | BWP 40 |
+| 25,001 – 100,000 | BWP 50 |
+| 100,001 – 500,000 | BWP 100 |
+| > 500,000 | BWP 200 |
 
 ```
-markup     = amount <= threshold
-               ? flatAmount
-               : flatAmount + pctAboveThreshold × (amount − threshold)
-totalDebit = amount + ycFee + markup
+customerFee = ycFee + flatTierFee + (0.5 × ycFee)   // = flat + 1.5 × ycFee
+totalDebit  = amount + customerFee
 ```
 
-Example (defaults): a 1,000 BWP domestic send → markup = `5 + 1% × (1000 − 500)` = **10 BWP**, on top of YC's own send fee.
+Example: 1,000 BWP domestic send with YC fee 10 BWP → PayLink flat **15 BWP** (tier 501–2,000) + YC markup **5 BWP** → customer fees **30 BWP** (10 + 15 + 5).
 
 ### Cross-border sends (different currency in and out)
 
@@ -374,7 +375,7 @@ recipient gets ≈ principalFx × displayRate
 
 | Component | Calculation | Env var |
 |-----------|-------------|---------|
-| **Cross-border fee** | YC disbursement fee on the **destination** leg (`getFeeConfig` for recipient country/currency/payout amount), converted to the sender's wallet currency, then marked up **15%** | `CROSSBORDER_FEE_MARKUP_PCT` (default `0.15`) |
+| **Service fee** | Same tiered BWP flat + 1.5× YC disbursement fee as domestic (tier basis = FX principal in wallet currency, converted to BWP for tier lookup) | `PAYLINK_YC_FEE_MULTIPLIER` (default `1.5`) |
 | **FX rate** | YC `/business/rates` bridged via USD, with **2%** margin shaved off (`displayRate = bridgedRate × 0.98`) | `CROSSBORDER_FX_MARGIN_PCT` |
 | **VIP FX margin** | 1% instead of 2%, for **business** accounts sending **BWP → South Africa (ZAR)** of at least **500,000 BWP** | `CROSSBORDER_VIP_FX_MARGIN_PCT` / `CROSSBORDER_VIP_MIN_AMOUNT_BWP` |
 
@@ -408,18 +409,37 @@ If send **fails** → wallet amount refunded, user notified.
 
 ## Workflow 4 — Pay invoice (Business only)
 
-Invoice payments include **POBO fees** plus a **live FX quote** before the user confirms. The supplier always receives the invoice face value **in the invoice's own currency**; the payer's single home-currency wallet is debited the **total** (face value + POBO + PayLink markup), bridged into the wallet's currency if it differs from the invoice's.
+Invoice payments use the **same PayLink service-fee model** as sends (tiered BWP flat + 1.5× YC disbursement fee). The supplier always receives the invoice face value **in the invoice's own currency**; the payer's home-currency wallet is debited the total (face + fees + FX margin when cross-currency).
 
 ### Fee formula (`lib/fees.js`)
 
 | Component | Calculation |
 |-----------|-------------|
 | **Supplier receives** | Invoice face value, in the invoice's own currency |
-| **Yellow Card POBO fee** | `$25 USD` (converted at YC sell rate) **+ 0.25%** of face value |
-| **PayLink markup** | `INVOICE_PROFIT_MARKUP_PCT` % of face value (default **1%**) |
-| **Invoice-currency total** | Face value + POBO fee + markup |
+| **Yellow Card disbursement fee** | Live `getFeeConfig` for send / recipient corridor |
+| **PayLink service fee** | Tiered BWP flat (see table above) + **0.5 × YC fee** (customer pays **1.5 × YC fee** total) |
+| **Invoice-currency charge** | Face value + YC fee + PayLink markup (`markup_amount` = flat + 0.5×YC) |
 
-Configure via `.env`: `POBO_FLAT_FEE_USD`, `POBO_FEE_PCT`, `INVOICE_PROFIT_MARKUP_PCT`.
+Configure via `.env`: `PAYLINK_YC_FEE_MULTIPLIER` (default `1.5`).
+
+### PayLink profit on a transaction
+
+PayLink gross profit has up to **three** components:
+
+| Component | Formula | Notes |
+|-----------|---------|-------|
+| **Flat tier fee** | Full BWP tier amount (converted to fee currency) | 100% profit — no pass-through |
+| **YC fee markup** | `0.5 × yc_fee_amount` | Customer pays 1.5× YC fee; YC keeps 1×, PayLink keeps 0.5× |
+| **FX margin** | Cross-border only: `walletDebit − (face / bridgedRate) − serviceFeesWallet` | From 2% (or 1% VIP) shave on bridged rate; not stored separately — derive from txn fields |
+
+Stored on `transactions`: `yc_fee_amount` (pass-through to YC), `markup_amount` (flat + 0.5×YC in invoice/send currency). **Service profit** ≈ `markup_amount`. **Total profit** adds FX margin on cross-currency legs.
+
+Example — **50,000 ZAR** invoice, **BWP** wallet, YC fee **250 ZAR**, bridged principal ≈ **41,300 BWP**:
+
+- Tier: 25,001–100,000 → flat **50 BWP**
+- YC fee profit: **125 ZAR** (0.5 × 250)
+- FX margin: ≈ **2%** of bridged principal ≈ **~825 BWP**
+- **Total PayLink profit** ≈ **50 BWP + 125 ZAR + ~825 BWP** (convert ZAR leg at prevailing rate for a single-currency total)
 
 ### Cross-currency invoices — bridged to the payer's home wallet
 
@@ -585,10 +605,8 @@ See `.env.example` for the full list:
 | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_WHATSAPP_NUMBER` | WhatsApp messaging |
 | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Database |
 | `YELLOWCARD_API_KEY` / `YELLOWCARD_SECRET_KEY` / `YELLOWCARD_BASE_URL` | Payments API + webhook HMAC |
-| `POBO_FLAT_FEE_USD` / `POBO_FEE_PCT` / `INVOICE_PROFIT_MARKUP_PCT` | Invoice payment fee quote (Workflow 4, unchanged) |
-| `FX_RATE_MULTIPLIER_BASE` / `QUOTE_LOCK_MINUTES` | Invoice payment live-quote margin/lock display (Workflow 4 only) |
-| `DOMESTIC_FEE_FLAT_AMOUNT` / `DOMESTIC_FEE_FLAT_THRESHOLD` / `DOMESTIC_FEE_PCT_ABOVE_THRESHOLD` | Domestic send fee markup, tiered (default `5` / `500` / `0.01`) — same for bank and momo |
-| `CROSSBORDER_FEE_MARKUP_PCT` | Cross-border fee markup on YC's destination-leg fee, in wallet currency (default `0.15`) |
+| `PAYLINK_YC_FEE_MULTIPLIER` | Service fee multiplier on YC disbursement fee — customer pays this × YC fee; PayLink keeps `(multiplier − 1) × YC fee` (default `1.5`) — applies to sends and invoice payments |
+| `FX_RATE_MULTIPLIER_BASE` / `QUOTE_LOCK_MINUTES` | Outbound quote margin/lock display |
 | `CROSSBORDER_FX_MARGIN_PCT` / `CROSSBORDER_VIP_FX_MARGIN_PCT` | Cross-border FX margin, standard vs VIP corridor (default `0.02` / `0.01`) — also used to bridge cross-currency invoice payments (Workflow 4) back to the payer's wallet |
 | `CROSSBORDER_VIP_MIN_AMOUNT_BWP` | Minimum BWP amount for the VIP FX margin (default `500000`) |
 | `TOPUP_FEE_MARKUP_PCT` | Top-up fee markup on YC's collection fee (default `0.10`) — deducted from wallet credit on completion |

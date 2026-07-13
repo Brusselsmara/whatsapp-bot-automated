@@ -224,14 +224,14 @@ Until approved, only the welcome screen and help text are available — no payme
 
 ## Workflow 2 — Top-up balance (fund user wallet)
 
-Top-up uses Yellow Card’s **receive** API. There's no currency choice — the bot already knows the user's home currency (derived from their WhatsApp number), so it goes straight to channel/amount. Before the top-up is submitted, the bot quotes Yellow Card's collection fee for that amount (`getFeeConfig` with `txType: receive`), adds a **10% PayLink markup** (`TOPUP_FEE_MARKUP_PCT`), and tells the customer that fee will be deducted when the top-up completes. When YC confirms payment, the user's **one wallet** is credited the **net** amount (gross top-up minus fee).
+Top-up uses Yellow Card’s **receive** API. There's no currency choice — the bot already knows the user's home currency (derived from their WhatsApp number), so it goes straight to channel/amount. Before the top-up is submitted, the bot quotes Yellow Card's collection fee for that amount (`getFeeConfig` with `txType: receive`), adds PayLink's **BWP 10 flat fee** (converted to the wallet currency when needed) plus **20% markup on the YC fee** (customer pays **1.2×** YC collection fee in total), and tells the customer that fee will be deducted when the top-up completes. When YC confirms payment, the user's **one wallet** is credited the **net** amount (gross top-up minus fee).
 
 | Component | Calculation | Env var |
 |-----------|-------------|---------|
-| **Top-up fee** | YC receive/collection fee for the intended amount + **10%** markup | `TOPUP_FEE_MARKUP_PCT` (default `0.10`) |
+| **Top-up fee** | BWP 10 flat + **1.2×** YC receive/collection fee | `TOPUP_FLAT_FEE_BWP` / `TOPUP_YC_FEE_MULTIPLIER` (default `10` / `1.2`) |
 | **Wallet credit** | `gross top-up − (yc_fee + markup)` on `RECEIVE.COMPLETE` | — |
 
-Example: a **9,000 BWP** momo top-up where YC's collection fee is **90 BWP** → markup **9 BWP** → customer sees *"A top-up fee of 99.00 BWP will be deducted… 8,901.00 BWP will be added to your wallet"* → on success, **8,901 BWP** is credited.
+Example: a **9,000 BWP** momo top-up where YC's collection fee is **90 BWP** → PayLink markup **28 BWP** (10 flat + 18) → customer sees *"A top-up fee of 118.00 BWP will be deducted… 8,882.00 BWP will be added to your wallet"* → on success, **8,882 BWP** is credited.
 
 **Supabase:** re-run the `claim_topup_credit` function from `db/schema.sql` so wallet credits use the net amount after fees.
 
@@ -609,7 +609,7 @@ See `.env.example` for the full list:
 | `FX_RATE_MULTIPLIER_BASE` / `QUOTE_LOCK_MINUTES` | Outbound quote margin/lock display |
 | `CROSSBORDER_FX_MARGIN_PCT` / `CROSSBORDER_VIP_FX_MARGIN_PCT` | Cross-border FX margin, standard vs VIP corridor (default `0.02` / `0.01`) — also used to bridge cross-currency invoice payments (Workflow 4) back to the payer's wallet |
 | `CROSSBORDER_VIP_MIN_AMOUNT_BWP` | Minimum BWP amount for the VIP FX margin (default `500000`) |
-| `TOPUP_FEE_MARKUP_PCT` | Top-up fee markup on YC's collection fee (default `0.10`) — deducted from wallet credit on completion |
+| `TOPUP_FLAT_FEE_BWP` / `TOPUP_YC_FEE_MULTIPLIER` | Top-up fee: BWP flat + multiplier on YC collection fee (default `10` / `1.2`) — deducted from wallet credit on completion |
 | `RESEND_API_KEY` / `RESEND_FROM_EMAIL` / `ADMIN_EMAIL` | KYC review emails |
 | `PUBLIC_APP_URL` | Deployment root URL only (e.g. `https://your-app.vercel.app`) — used for KYC email links, receipts, webhooks. **Not** the `/api/whatsapp` path |
 | `CRON_SECRET` | Protects `/api/poll-topups` |

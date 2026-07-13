@@ -376,3 +376,8 @@ where phone in (
     )
   )
 );
+
+-- ============================================================
+-- Row Level Security — run db/migrations/001_enable_rls.sql after this file.
+-- Enables deny-all policies for anon/authenticated; service_role bypasses RLS.
+-- ============================================================

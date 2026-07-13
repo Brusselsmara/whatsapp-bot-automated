@@ -9,6 +9,7 @@ const {
 } = require('../lib/settlement');
 const { deliverSendReceipt, SEND_COMPLETE } = require('../lib/receipt-delivery');
 const { formatTopupSettlementMessage } = require('../lib/quotes');
+const { captureError } = require('../lib/observability');
 
 /**
  * GET /api/poll-topups
@@ -21,7 +22,11 @@ module.exports = async (req, res) => {
   }
 
   const secret = req.headers['x-cron-secret'] || req.query.secret;
-  if (process.env.CRON_SECRET && secret !== process.env.CRON_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
+      return res.status(401).send('Unauthorized');
+    }
+  } else if (process.env.CRON_SECRET && secret !== process.env.CRON_SECRET) {
     return res.status(401).send('Unauthorized');
   }
 
@@ -89,7 +94,7 @@ module.exports = async (req, res) => {
     console.log('[POLL] Done:', JSON.stringify(summary));
     return res.status(200).json({ polled: pending.length, summary });
   } catch (err) {
-    console.error('[POLL] Unexpected error:', err);
+    captureError(err, { handler: 'poll-topups' });
     return res.status(500).json({ error: err.message });
   }
 };

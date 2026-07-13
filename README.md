@@ -586,13 +586,24 @@ Real phone numbers in sandbox may stay **pending** indefinitely. Production bank
 
 ### 6. Cron poller (recommended)
 
-Hit every 2–5 minutes:
+Vercel **free tier has no built-in cron**. Use an external scheduler to hit this endpoint every 2–5 minutes:
 
 ```
 https://<your-app>.vercel.app/api/poll-topups?secret=<CRON_SECRET>
 ```
 
-Free options: [cron-job.org](https://cron-job.org). Vercel Hobby cron is limited to once/day.
+Or send header `x-cron-secret: <CRON_SECRET>` (no secret in URL).
+
+#### cron-job.org setup (free)
+
+1. Generate a secret: `openssl rand -hex 32`
+2. Add `CRON_SECRET` in Vercel → Settings → Environment Variables → **Production**, then **redeploy**
+3. Test in browser: `https://<your-app>.vercel.app/api/poll-topups?secret=<CRON_SECRET>` → expect `{"polled":0,"message":"Nothing pending"}`
+4. Sign up at [cron-job.org](https://cron-job.org) → **Create cronjob**
+5. URL: your poll-topups URL above; method **GET**; schedule **every 5 minutes**; timeout **60s**
+6. Run once manually → confirm HTTP **200** in execution history; check Vercel function logs for `[POLL]`
+
+This poller is a safety net — webhooks and per-message settlement handle most cases. Without cron, users who top up and never message again may wait until they return.
 
 ---
 
@@ -612,7 +623,46 @@ See `.env.example` for the full list:
 | `TOPUP_FLAT_FEE_BWP` / `TOPUP_YC_FEE_MULTIPLIER` | Top-up fee: BWP flat + multiplier on YC collection fee (default `10` / `1.2`) — deducted from wallet credit on completion |
 | `RESEND_API_KEY` / `RESEND_FROM_EMAIL` / `ADMIN_EMAIL` | KYC review emails |
 | `PUBLIC_APP_URL` | Deployment root URL only (e.g. `https://your-app.vercel.app`) — used for KYC email links, receipts, webhooks. **Not** the `/api/whatsapp` path |
-| `CRON_SECRET` | Protects `/api/poll-topups` |
+| `CRON_SECRET` | Protects `/api/poll-topups` (**required in production**) |
+| `RECEIPT_SIGNING_SECRET` | HMAC secret for signed PDF receipt URLs (**recommended in production**; falls back to `CRON_SECRET`) |
+| `SENTRY_DSN` | Optional Sentry DSN for production error alerts |
+
+---
+
+## Production hardening
+
+### Row Level Security (Supabase)
+
+After running `db/schema.sql`, apply RLS in the Supabase SQL editor:
+
+```bash
+# File: db/migrations/001_enable_rls.sql
+```
+
+This enables deny-all policies for `anon` and `authenticated` on all tables. The Vercel backend uses `SUPABASE_SERVICE_ROLE_KEY`, which bypasses RLS.
+
+**Verify:** With the anon key, `GET /rest/v1/wallets` should return no rows (or 401).
+
+### Automated tests
+
+```bash
+npm install
+npm test
+```
+
+Tests cover tiered fees, invoice quotes, cross-border FX solving, receipt fee reconstruction, integer-safe money math (`lib/money.js`), and receipt URL signing (`tests/`).
+
+### Integer-safe money math
+
+Settlement-critical paths use `lib/money.js` (minor-unit arithmetic) instead of raw `parseFloat` chains. This prevents cent-level drift on fee totals, FX conversions, and wallet debits.
+
+### Signed receipt URLs
+
+When `RECEIPT_SIGNING_SECRET` (or `CRON_SECRET`) is set in production, `/api/receipt` requires a valid `sig` query param. Receipt links sent via WhatsApp are signed automatically by `lib/receipt-delivery.js`.
+
+### Error tracking
+
+Set `SENTRY_DSN` in Vercel production env. Errors from WhatsApp, Yellow Card webhooks, and the cron poller are captured via `lib/observability.js`.
 
 ---
 
@@ -643,6 +693,23 @@ See `.env.example` for the full list:
 - **No rate limiting** on webhooks beyond Twilio signature + `CRON_SECRET`
 - **YC API retries** — transient failures surface as user-visible errors; wallet refunds on failed debits where applicable
 - **Old pending transactions** from before payload fixes may need Yellow Card support to cancel
+
+---
+
+## Production E2E checklist
+
+Run this matrix on **production Yellow Card** before go-live (not sandbox):
+
+| # | Flow | Verify |
+|---|------|--------|
+| 1 | Registration + KYC | Admin approves; wallet created in home currency |
+| 2 | Top-up | Fee deducted (BWP 10 + 1.2× YC); balance credited |
+| 3 | Domestic send | Combined fee shown; wallet debited; PDF receipt with `sig` opens |
+| 4 | Cross-border send (BWP→ZAR momo) | FX rate + all-in fee; recipient amount on receipt |
+| 5 | Cross-currency invoice (BWP wallet → ZAR invoice) | Bank resolve returns name; no `destination name` error; fees match quote |
+| 6 | Failed send | Wallet refunded; no duplicate receipt |
+| 7 | Cron poller | `/api/poll-topups` rejects without `CRON_SECRET`; completes stuck sends |
+| 8 | RLS | Anon key cannot read `wallets` / `transactions` |
 
 ---
 

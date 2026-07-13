@@ -4,9 +4,12 @@
   "private": true,
   "description": "WhatsApp bot for cross-border payments and invoice settlement (BW/ZA/ZM)",
   "scripts": {
-    "dev": "vercel dev"
+    "dev": "vercel dev",
+    "test": "jest",
+    "test:watch": "jest --watch"
   },
   "dependencies": {
+    "@sentry/node": "^8.47.0",
     "@supabase/supabase-js": "^2.45.4",
     "twilio": "^5.3.0",
     "uuid": "^9.0.1",
@@ -14,6 +17,7 @@
   },
   "devDependencies": {
     "dotenv": "^16.4.5",
+    "jest": "^29.7.0",
     "vercel": "^37.0.0"
   }
 }

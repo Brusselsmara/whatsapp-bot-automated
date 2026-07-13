@@ -9,6 +9,7 @@ const {
 } = require('../lib/settlement');
 const { deliverSendReceipt } = require('../lib/receipt-delivery');
 const { formatTopupSettlementMessage } = require('../lib/quotes');
+const { captureError } = require('../lib/observability');
 
 module.exports.config = { api: { bodyParser: false } };
 
@@ -61,7 +62,7 @@ module.exports = async (req, res) => {
 
     return res.status(200).json({ received: true });
   } catch (err) {
-    console.error('[WEBHOOK] Error:', err);
+    captureError(err, { handler: 'yellowcard-webhook', event: event?.event, ycId: event?.id });
     return res.status(500).json({ received: false, error: 'logged' });
   }
 };
@@ -94,7 +95,7 @@ async function handleTopupUpdate(txn, status, event) {
           newBalance: result.newBalance,
         }));
     } catch (err) {
-      console.error(`[WEBHOOK] claim_topup_credit failed for ${txn.id}:`, err.message);
+      captureError(err, { handler: 'yellowcard-webhook', action: 'claim_topup_credit', txnId: txn.id });
       throw err;
     }
 

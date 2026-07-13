@@ -2,6 +2,7 @@ const querystring = require('querystring');
 const twilio = require('twilio');
 const { handleIncomingMessage } = require('../lib/conversation');
 const { getPublicAppUrl } = require('../lib/app-url');
+const { captureError } = require('../lib/observability');
 
 // This is the URL you'll paste into Twilio's WhatsApp Sandbox / Sender config:
 //   https://<your-vercel-app>.vercel.app/api/whatsapp
@@ -81,7 +82,7 @@ module.exports = async (req, res) => {
   try {
     reply = await handleIncomingMessage(fromPhone, text, mediaUrls);
   } catch (err) {
-    console.error('[WHATSAPP] Error handling message:', err);
+    captureError(err, { handler: 'whatsapp', fromPhone, text });
     reply = 'Sorry, something went wrong. Please reply "menu" to start over.';
   }
 

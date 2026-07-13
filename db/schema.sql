@@ -40,7 +40,7 @@ alter table users add column if not exists kyc_email text;
 alter table users add column if not exists fx_margin_pct numeric(6,4) default 0.02;
 
 -- Home currency/country — derived automatically from the user's WhatsApp
--- phone number's dial code (+267/BWP, +27/ZAR, +260/ZMW only). Unsupported
+-- phone number's dial code (see lib/yellowcard.js COUNTRY_CONFIG). Unsupported
 -- dial codes cannot register; see de-register block at end of this file.
 alter table users add column if not exists home_currency text;
 alter table users add column if not exists home_country text;
@@ -91,6 +91,7 @@ create table if not exists invoices (
   payer_phone text,
   amount numeric(18,2) not null,
   currency text not null,
+  country text,
   description text,
   status text default 'pending',
   yellowcard_reference text,
@@ -332,7 +333,7 @@ alter table kyc_submissions add column if not exists resubmission_count integer 
 alter table kyc_submissions add column if not exists note text;
 
 -- ============================================================
--- De-register unsupported WhatsApp numbers (not BW / ZA / ZM dial codes)
+-- De-register unsupported WhatsApp numbers (dial codes not in COUNTRY_CONFIG)
 -- Mirrors detectCountryFromNumber() in lib/yellowcard.js — safe to re-run.
 -- ============================================================
 update users
@@ -349,8 +350,7 @@ set
   business_name = null,
   account_type = 'individual'
 where not (
-  regexp_replace(phone, '\D', '', 'g') ~ '^267'
-  or regexp_replace(phone, '\D', '', 'g') ~ '^260'
+  regexp_replace(phone, '\D', '', 'g') ~ '^(267|265|260|256|255|254|250|243|242|241|237|235|234|229|228|226|225|223|221)'
   or (
     regexp_replace(phone, '\D', '', 'g') ~ '^27'
     and regexp_replace(phone, '\D', '', 'g') !~ '^267'
@@ -367,8 +367,7 @@ delete from sessions
 where phone in (
   select phone from users
   where not (
-    regexp_replace(phone, '\D', '', 'g') ~ '^267'
-    or regexp_replace(phone, '\D', '', 'g') ~ '^260'
+    regexp_replace(phone, '\D', '', 'g') ~ '^(267|265|260|256|255|254|250|243|242|241|237|235|234|229|228|226|225|223|221)'
     or (
       regexp_replace(phone, '\D', '', 'g') ~ '^27'
       and regexp_replace(phone, '\D', '', 'g') !~ '^267'

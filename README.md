@@ -1,8 +1,8 @@
 # PayLink — WhatsApp Cross-Border Payments Bot
 
-PayLink is a WhatsApp bot that lets individuals and businesses register, verify their identity, fund an internal wallet, and send money or pay invoices to bank accounts and mobile money wallets across **Botswana (BWP)**, **South Africa (ZAR)**, and **Zambia (ZMW)**.
+PayLink is a WhatsApp bot that lets individuals and businesses register, verify their identity, fund an internal wallet, and send money or pay invoices to bank accounts and mobile money wallets across **19 African countries** (plus send-only corridors), per your **YC Addendum 1** fee schedule.
 
-Each user has exactly **one wallet**, in their **home currency** — auto-detected from the WhatsApp number's dial code (`+267…` → BWP, `+27…` → ZAR, `+260…` → ZMW). **Only these country codes can register**; numbers from other countries (e.g. UK `+44`) are blocked with a message listing the accepted codes. Top-ups always fund that one wallet. Sending money to a recipient in a *different* currency (a cross-border send) is fully supported — the bot bridges the conversion internally (via USD) and shows the sender the exchange rate, fee, and total cost before they confirm; the recipient never sees or needs a foreign-currency wallet.
+Each user has exactly **one wallet**, in their **home currency** — auto-detected from the WhatsApp number's dial code (e.g. `+267…` → BWP, `+234…` → NGN). **Only supported African country codes can register** (see Country & channel coverage); numbers from other countries (e.g. UK `+44`) are blocked with a message listing accepted codes.
 
 Built with **Twilio WhatsApp** + **Node.js on Vercel** + **Supabase Postgres** + **Yellow Card** (fiat settlement).
 
@@ -113,15 +113,50 @@ You must fund the YC Treasury separately (stablecoin deposit in the Treasury Por
 
 ## Country & channel coverage
 
-Yellow Card currently supports these corridors for this bot:
+Yellow Card corridors enabled in this bot — aligned with **YC Addendum 1** (Payments API Fee Schedule) and `lib/yellowcard.js`:
 
 | Country | Currency | Top-up bank | Top-up momo | Send bank | Send momo |
 |---------|----------|:-----------:|:-----------:|:---------:|:---------:|
-| Botswana | BWP | ✅ | ✅ (MyZaka, etc.) | ✅ | ✅ |
+| Benin | XOF | ❌ | ✅ | ❌ | ✅ |
+| Burkina Faso | XOF | ❌ | ✅ | ❌ | ✅ |
+| Botswana | BWP | ✅ | ✅ | ✅ | ✅ |
+| Cameroon | XAF | ❌ | ✅ | ❌ | ✅ |
+| Chad | XAF | ❌ | ✅ | ❌ | ✅ |
+| Congo Brazzaville | XAF | ❌ | ✅ | ❌ | ✅ |
+| DR Congo | CDF | ❌ | ❌ | ❌ | ✅ *(send-only)* |
+| Ethiopia | USD | ❌ | ❌ | ✅ *(send-only)* | ❌ |
+| Ivory Coast | XOF | ❌ | ✅ | ❌ | ✅ |
+| Gabon | XAF | ✅ | ✅ | ❌ | ✅ |
+| Kenya | KES | ✅ | ✅ | ✅ | ✅ |
+| Malawi | MWK | ✅ | ✅ | ✅ | ✅ |
+| Mali | XOF | ❌ | ✅ | ❌ | ✅ |
+| Nigeria | NGN | ✅ | ❌ | ✅ | ❌ |
+| Rwanda | RWF | ✅ | ✅ | ✅ | ✅ |
+| Senegal | XOF | ❌ | ✅ | ❌ | ✅ |
 | South Africa | ZAR | ✅ | ❌ | ✅ | ❌ |
-| Zambia | ZMW | ❌ | ✅ | ❌ | ✅ |
+| Tanzania | TZS | ✅ | ✅ | ✅ | ✅ |
+| Togo | XOF | ❌ | ✅ | ❌ | ✅ |
+| Uganda | UGX | ✅ | ✅ | ✅ | ✅ |
+| Zambia | ZMW | ✅ | ✅ | ✅ | ✅ |
 
-**Not supported yet:** Namibia (NAD), Zimbabwe (ZWL) — excluded until Yellow Card lists them on their [Africa coverage page](https://docs.yellowcard.engineering/docs/africa).
+### LATAM (send / payout only)
+
+Per YC Addendum §3 — bank disbursements only; no local wallet or top-up:
+
+| Country | Currency | Send bank |
+|---------|----------|:---------:|
+| Argentina | ARS | ✅ |
+| Brazil | BRL | ✅ |
+| Colombia | COP | ✅ |
+| Mexico | MXN | ✅ |
+
+Cross-border sends from an African home wallet to LATAM use the same live `getFeeConfig` + PayLink markup model (tiered BWP flat + 1.5× YC fee). Fees are not hardcoded from the addendum.
+
+**Registration (19 African countries):** WhatsApp dial code must match a registerable corridor in the Africa table. **DR Congo**, **Ethiopia**, and **LATAM** are payout destinations only — no local wallet/top-up.
+
+**YC fees:** The addendum defines YC's B2B collection/disbursement fees per country. PayLink still quotes live fees via `getFeeConfig` and adds its own tiered markup on top.
+
+**Not in addendum:** Namibia, Zimbabwe — still excluded.
 
 **Transaction limits:** minimum **10**, maximum **100,000** (local currency units) per transaction.
 
@@ -166,7 +201,7 @@ Reply **hi**, **hello**, **menu**, or **start** anytime to return to the main me
 
 ## Workflow 1 — Customer registration (Individual & Business)
 
-Registration is **only** open to WhatsApp numbers from **Botswana (+267)**, **South Africa (+27)**, or **Zambia (+260)**. Any other dial code (e.g. UK `+44`, US `+1`) receives a message listing the accepted country codes and cannot proceed. Existing registrations on unsupported numbers are reset to `unregistered` (run the migration at the end of `db/schema.sql`, or let the bot de-register lazily on the next message).
+Registration is open to WhatsApp numbers from any **registerable African corridor** in `lib/yellowcard.js` (19 countries — see Country & channel coverage). Any other dial code (e.g. UK `+44`, US `+1`) receives a message listing accepted country codes and cannot proceed.
 
 Both account types follow the same steps after choosing account type. Businesses collect one extra field (business name) and require more documents.
 
@@ -670,12 +705,12 @@ Set `SENTRY_DSN` in Vercel production env. Errors from WhatsApp, Yellow Card web
 
 | Table | Purpose |
 |-------|---------|
-| `users` | One row per WhatsApp phone; KYC fields; `account_type`; `kyc_status`; `home_currency` / `home_country` (auto-detected from supported dial codes +267 / +27 / +260 only); `fx_margin_pct` (invoice payments only) |
+| `users` | One row per WhatsApp phone; KYC fields; `account_type`; `kyc_status`; `home_currency` / `home_country` (auto-detected from supported dial codes); `fx_margin_pct` (invoice payments only) |
 | `kyc_submissions` | Document URLs, approval token, admin decisions |
 | `sessions` | Conversation state machine (`state` + `context` JSON) |
 | `wallets` | Balance per user per currency — in practice always exactly one row (the user's `home_currency`) |
 | `transactions` | Top-ups, sends, invoice payments; `currency`/`amount` = wallet debit/credit; `payout_currency`/`payout_amount` = what the recipient actually received (differs from `currency` on cross-border sends *and* cross-currency invoice payments); `quote_id`; `margin_pct` (bridging margin when cross-currency, else the settlement-quote margin); `wallet_credited` / `wallet_refunded` |
-| `invoices` | Business-created invoices with shareable codes |
+| `invoices` | Business-created invoices with shareable codes; `country` + `currency` for payout routing |
 
 ---
 

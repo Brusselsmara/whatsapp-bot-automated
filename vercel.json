@@ -7,6 +7,7 @@
     "api/receipt.js":               { "maxDuration": 15 },
     "api/fee-schedule.js":          { "maxDuration": 15 },
     "api/admin-kyc-decision.js":    { "maxDuration": 15 },
-    "api/admin-kyc-request-info.js":{ "maxDuration": 10 }
+    "api/admin-kyc-request-info.js":{ "maxDuration": 10 },
+    "api/admin.js":                 { "maxDuration": 30 }
   }
 }

@@ -21,6 +21,17 @@ describe('whatsapp-meta', () => {
     });
     expect(challenge).toBe('1234567890');
     expect(handleVerifyChallenge({ 'hub.mode': 'subscribe', 'hub.verify_token': 'wrong' })).toBeNull();
+    expect(handleVerifyChallenge({
+      hub: { mode: 'subscribe', verify_token: 'my-verify-token', challenge: 'nested-ok' },
+    })).toBe('nested-ok');
+  });
+
+  it('parses verify query from request URL', () => {
+    const { parseVerifyQueryFromUrl } = require('../lib/whatsapp-meta');
+    const q = parseVerifyQueryFromUrl('/api/whatsapp?hub.mode=subscribe&hub.verify_token=abc&hub.challenge=999');
+    expect(q['hub.mode']).toBe('subscribe');
+    expect(q['hub.verify_token']).toBe('abc');
+    expect(q['hub.challenge']).toBe('999');
   });
 
   it('verifies webhook signature', () => {

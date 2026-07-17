@@ -1,6 +1,7 @@
 const { handleIncomingMessage } = require('../lib/conversation');
 const {
   handleVerifyChallenge,
+  parseVerifyQueryFromUrl,
   verifyWebhookSignature,
   parseInboundWebhook,
   sendWhatsApp,
@@ -24,10 +25,17 @@ function readRawBody(req) {
 
 module.exports = async (req, res) => {
   if (req.method === 'GET') {
-    const challenge = handleVerifyChallenge(req.query);
+    const query = { ...parseVerifyQueryFromUrl(req.url), ...(req.query || {}) };
+    const challenge = handleVerifyChallenge(query);
     if (challenge != null) {
       console.log('[WHATSAPP] Webhook verified (Meta challenge)');
       return res.status(200).send(challenge);
+    }
+    if (query['hub.mode'] === 'subscribe') {
+      console.error('[WHATSAPP] Meta webhook verify failed', {
+        hasVerifyTokenEnv: !!(process.env.WHATSAPP_VERIFY_TOKEN || '').trim(),
+      });
+      return res.status(403).send('Verify token mismatch or WHATSAPP_VERIFY_TOKEN not set');
     }
     return res.status(200).send('PayLink WhatsApp webhook OK');
   }

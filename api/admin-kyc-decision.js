@@ -1,5 +1,5 @@
 const { supabase } = require('../lib/db');
-const { sendWhatsApp } = require('../lib/twilio');
+const { sendWhatsApp } = require('../lib/whatsapp');
 const yc = require('../lib/yellowcard');
 const { buildFeeScheduleUrl, formatKycApprovalMessage } = require('../lib/fee-schedule');
 const { getPublicAppUrl } = require('../lib/app-url');

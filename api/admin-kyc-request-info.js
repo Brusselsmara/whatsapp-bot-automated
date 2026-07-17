@@ -6,7 +6,7 @@
  */
 
 const { supabase } = require('../lib/db');
-const { sendWhatsApp } = require('../lib/twilio');
+const { sendWhatsApp } = require('../lib/whatsapp');
 const { getMissingDocsMessage } = require('../lib/email');
 
 module.exports = async (req, res) => {

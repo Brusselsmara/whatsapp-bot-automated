@@ -1,5 +1,5 @@
 const { supabase } = require('../lib/db');
-const { sendWhatsApp } = require('../lib/twilio');
+const { sendWhatsApp } = require('../lib/whatsapp');
 const { getWebhookSignature, verifyWebhookSignature } = require('../lib/yellowcard');
 const {
   claimTopupCredit,

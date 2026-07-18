@@ -1,15 +1,10 @@
+const querystring = require('querystring');
+const twilio = require('twilio');
 const { handleIncomingMessage } = require('../lib/conversation');
-const {
-  handleVerifyChallenge,
-  parseVerifyQueryFromUrl,
-  verifyWebhookSignature,
-  parseInboundWebhook,
-  sendWhatsApp,
-  isMetaWhatsAppConfigured,
-} = require('../lib/whatsapp-meta');
+const { getPublicAppUrl } = require('../lib/app-url');
 const { captureError } = require('../lib/observability');
 
-// Meta WhatsApp Cloud API webhook:
+// Paste this URL into Twilio Console → Messaging → WhatsApp Sender → webhook:
 //   https://<your-vercel-app>.vercel.app/api/whatsapp
 
 module.exports.config = { api: { bodyParser: false } };
@@ -23,25 +18,34 @@ function readRawBody(req) {
   });
 }
 
-module.exports = async (req, res) => {
-  if (req.method === 'GET') {
-    const query = { ...parseVerifyQueryFromUrl(req.url), ...(req.query || {}) };
-    const challenge = handleVerifyChallenge(query);
-    if (challenge != null) {
-      console.log('[WHATSAPP] Webhook verified (Meta challenge)');
-      return res.status(200).send(challenge);
-    }
-    if (query['hub.mode'] === 'subscribe') {
-      console.error('[WHATSAPP] Meta webhook verify failed', {
-        hasVerifyTokenEnv: !!(process.env.WHATSAPP_VERIFY_TOKEN || '').trim(),
-      });
-      return res.status(403).send('Verify token mismatch or WHATSAPP_VERIFY_TOKEN not set');
-    }
-    return res.status(200).send('PayLink WhatsApp webhook OK');
-  }
+function webhookUrlCandidates(req) {
+  const baseUrl = getPublicAppUrl();
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  const proto = req.headers['x-forwarded-proto'] || 'https';
+  const path = '/api/whatsapp';
 
-  if (req.method === 'HEAD') {
-    return res.status(200).end();
+  const urls = [];
+  if (baseUrl) urls.push(`${baseUrl}${path}`);
+  if (host) {
+    urls.push(`${proto}://${host}${path}`);
+    if (proto !== 'https') urls.push(`https://${host}${path}`);
+  }
+  return [...new Set(urls)];
+}
+
+function validateTwilioSignature(req, params) {
+  const signature = req.headers['x-twilio-signature'];
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  if (!authToken || !signature) return false;
+
+  return webhookUrlCandidates(req).some((url) =>
+    twilio.validateRequest(authToken, signature, url, params)
+  );
+}
+
+module.exports = async (req, res) => {
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    return res.status(200).send('PayLink WhatsApp webhook OK');
   }
 
   if (req.method !== 'POST') {
@@ -50,67 +54,39 @@ module.exports = async (req, res) => {
   }
 
   const rawBody = await readRawBody(req);
-  const signature = req.headers['x-hub-signature-256'];
+  const params = querystring.parse(rawBody);
 
-  if (process.env.NODE_ENV === 'production') {
-    if (!getAppSecretConfigured()) {
-      console.error('[WHATSAPP] WHATSAPP_APP_SECRET is required in production');
-      return res.status(503).send('Webhook not configured');
-    }
-    if (!verifyWebhookSignature(rawBody, signature)) {
-      console.error('[WHATSAPP] Invalid Meta webhook signature');
-      return res.status(403).send('Invalid signature');
-    }
-  } else if (getAppSecretConfigured() && !verifyWebhookSignature(rawBody, signature)) {
-    console.warn('[WHATSAPP] Invalid signature (non-production — continuing)');
+  const isValid = validateTwilioSignature(req, params);
+  if (!isValid && process.env.NODE_ENV === 'production') {
+    console.error('[WHATSAPP] Invalid Twilio signature', {
+      urls: webhookUrlCandidates(req),
+      host: req.headers.host,
+      hasAuthToken: !!process.env.TWILIO_AUTH_TOKEN,
+    });
+    return res.status(403).send('Invalid signature');
   }
 
-  let body;
+  const fromPhone = (params.From || '').replace('whatsapp:', '');
+  const text = params.Body || '';
+  console.log(`[WHATSAPP] Inbound from ${fromPhone}: ${JSON.stringify(text)}`);
+
+  const numMedia = parseInt(params.NumMedia || '0', 10);
+  const mediaUrls = [];
+  for (let i = 0; i < numMedia; i++) {
+    if (params[`MediaUrl${i}`]) mediaUrls.push(params[`MediaUrl${i}`]);
+  }
+
+  let reply;
   try {
-    body = JSON.parse(rawBody || '{}');
-  } catch {
-    return res.status(400).send('Invalid JSON');
+    reply = await handleIncomingMessage(fromPhone, text, mediaUrls);
+  } catch (err) {
+    captureError(err, { handler: 'whatsapp', fromPhone, text });
+    reply = 'Sorry, something went wrong. Please reply "menu" to start over.';
   }
 
-  const messages = parseInboundWebhook(body);
-  if (messages.length === 0) {
-    return res.status(200).send('OK');
-  }
+  const twiml = new twilio.twiml.MessagingResponse();
+  twiml.message(reply);
 
-  if (!isMetaWhatsAppConfigured()) {
-    console.error('[WHATSAPP] Meta WhatsApp not configured — dropping inbound messages');
-    return res.status(503).send('WhatsApp not configured');
-  }
-
-  for (const inbound of messages) {
-    console.log(`[WHATSAPP] Inbound from ${inbound.phone}: ${JSON.stringify(inbound.text)}`);
-
-    let reply;
-    try {
-      reply = await handleIncomingMessage(inbound.phone, inbound.text, inbound.mediaRefs);
-    } catch (err) {
-      captureError(err, {
-        handler: 'whatsapp',
-        fromPhone: inbound.phone,
-        text: inbound.text,
-      });
-      reply = 'Sorry, something went wrong. Please reply "menu" to start over.';
-    }
-
-    try {
-      await sendWhatsApp(inbound.phone, reply);
-    } catch (err) {
-      captureError(err, {
-        handler: 'whatsapp_send',
-        fromPhone: inbound.phone,
-      });
-      console.error('[WHATSAPP] Failed to send reply:', err.message);
-    }
-  }
-
-  return res.status(200).send('OK');
+  res.setHeader('Content-Type', 'text/xml');
+  res.status(200).send(twiml.toString());
 };
-
-function getAppSecretConfigured() {
-  return !!(process.env.WHATSAPP_APP_SECRET || '').trim();
-}

@@ -60,6 +60,20 @@ create table if not exists kyc_submissions (
 );
 
 -- ============================================================
+-- APP DOCUMENTS — KYC uploads from the PayLink PWA
+-- ============================================================
+create table if not exists app_documents (
+  id uuid primary key default uuid_generate_v4(),
+  phone text not null,
+  filename text,
+  content_type text,
+  data_base64 text not null,
+  created_at timestamptz default now()
+);
+
+create index if not exists app_documents_phone_idx on app_documents (phone);
+
+-- ============================================================
 -- SESSIONS — conversation state machine, one row per phone number
 -- ============================================================
 create table if not exists sessions (

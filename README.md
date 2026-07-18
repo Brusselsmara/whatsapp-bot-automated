@@ -1,10 +1,12 @@
-# PayLink — WhatsApp Cross-Border Payments Bot
+# PayLink — WhatsApp + Installable Web App
 
-PayLink is a WhatsApp bot that lets individuals and businesses register, verify their identity, fund an internal wallet, and send money or pay invoices to bank accounts and mobile money wallets across **19 African countries** (plus send-only corridors), per your **YC Addendum 1** fee schedule.
+PayLink lets individuals and businesses register, verify their identity, fund an internal wallet, and send money or pay invoices to bank accounts and mobile money wallets across **19 African countries** (plus send-only corridors), per your **YC Addendum 1** fee schedule.
 
-Each user has exactly **one wallet**, in their **home currency** — auto-detected from the WhatsApp number's dial code (e.g. `+267…` → BWP, `+234…` → NGN). **Only supported African country codes can register** (see Country & channel coverage); numbers from other countries (e.g. UK `+44`) are blocked with a message listing accepted codes.
+Customers can use **WhatsApp** (via Twilio) or the **installable web app (PWA)** at your Vercel URL — both share the same backend, wallet, and conversation logic.
 
-Built with **Meta WhatsApp Cloud API** + **Node.js on Vercel** + **Supabase Postgres** + **Yellow Card** (fiat settlement).
+Each user has exactly **one wallet**, in their **home currency** — auto-detected from their phone number's dial code (e.g. `+267…` → BWP, `+234…` → NGN). **Only supported African country codes can register** (see Country & channel coverage); numbers from other countries (e.g. UK `+44`) are blocked with a message listing accepted codes.
+
+Built with **Twilio WhatsApp** + **PWA** + **Node.js on Vercel** + **Supabase Postgres** + **Yellow Card** (fiat settlement).
 
 ---
 
@@ -31,13 +33,9 @@ Built with **Meta WhatsApp Cloud API** + **Node.js on Vercel** + **Supabase Post
 ## Architecture
 
 ```
-Customer WhatsApp
-      │
-      ▼
-Meta WhatsApp Cloud API  ──►  /api/whatsapp.js
-                                │
-                                ▼
-                        lib/conversation.js   (state machine / menus)
+Customer WhatsApp ──► Twilio ──► /api/whatsapp.js ──┐
+                                                     ├──► lib/conversation.js
+Customer PWA (/) ──► /api/app.js ──────────────────┘
                                 │
               ┌─────────────────┼─────────────────┐
               ▼                 ▼                 ▼
@@ -49,14 +47,18 @@ Meta WhatsApp Cloud API  ──►  /api/whatsapp.js
               │                 ▼
               │     /api/yellowcard-webhook.js
               │                 │
-              └────────► Meta WhatsApp reply + PDF receipt
+              └────────► Twilio WhatsApp reply + PDF receipt
+                         (PWA shows replies in-browser)
 ```
 
 ### API endpoints
 
 | Endpoint | Purpose |
 |----------|---------|
-| `POST /api/whatsapp` | Incoming Meta WhatsApp messages (text + media) |
+| `GET /` | PayLink PWA (installable web app) |
+| `POST /api/app` | PWA API — login, chat messages, KYC uploads |
+| `POST /api/whatsapp` | Incoming Twilio WhatsApp messages (text + media) |
+| `GET/POST /api/admin` | Operator dashboard (money in/out, CSV export) |
 | `POST /api/yellowcard-webhook` | Yellow Card payment status events |
 | `GET /api/poll-transactions` | Cron poller — pending top-ups, sends, invoice payments, and PDF receipts (`/api/poll-topups` alias) |
 | `GET /api/receipt?id=` | PDF remittance receipt (completed sends only) |
@@ -247,7 +249,7 @@ flowchart TD
 ### What happens after submission
 
 1. User record saved with `kyc_status = pending_review`
-2. Documents stored in `kyc_submissions` (Meta media ids as `meta:{id}`)
+2. Documents stored in `kyc_submissions` (Twilio media URLs or PWA refs `web:{uuid}`)
 3. Admin receives email (Resend) with attachments and three actions:
    - **Approve** → `kyc_status = approved`, home-currency wallet created at 0, WhatsApp welcome message
    - **Reject** → `kyc_status = rejected`, user notified
@@ -601,25 +603,26 @@ Real phone numbers in sandbox may stay **pending** indefinitely. Production bank
 3. Copy **Project URL** → `SUPABASE_URL`
 4. Copy **service_role** key → `SUPABASE_SERVICE_ROLE_KEY`
 
-### 2. Meta WhatsApp Cloud API
+### 2. Twilio WhatsApp
 
-1. Go to [Meta for Developers](https://developers.facebook.com) → **Create app** → type **Business**
-2. Add the **WhatsApp** product to your app
-3. In **WhatsApp → API Setup**, note:
-   - **Phone number ID**
-   - **WhatsApp Business Account ID** (optional)
-4. Create a **System User** in [Meta Business Suite](https://business.facebook.com) → **Business settings → Users → System users**
-   - Generate a **permanent token** with permissions:
-     - `whatsapp_business_messaging`
-     - `whatsapp_business_management`
-5. Add your production phone number under **WhatsApp → API Setup → Add phone number** (business verification required)
-6. Set webhook (after Vercel deploy — see step 5 below):
-   - **Callback URL:** `https://<your-app>.vercel.app/api/whatsapp`
-   - **Verify token:** same as `WHATSAPP_VERIFY_TOKEN` in Vercel
-   - Subscribe to **`messages`**
-7. Copy **App Secret** from App → **Settings → Basic** → `WHATSAPP_APP_SECRET`
+1. Create an account at https://www.twilio.com
+2. Enable **WhatsApp** — use the **Sandbox** for testing (`join <code>` from your phone)
+3. Copy **Account SID** → `TWILIO_ACCOUNT_SID`, **Auth Token** → `TWILIO_AUTH_TOKEN`
+4. Set **Sandbox number** (or production sender) → `TWILIO_WHATSAPP_NUMBER` (e.g. `whatsapp:+14155238886`)
+5. After Vercel deploy, set the webhook URL in Twilio Console → **Messaging → WhatsApp Sandbox settings** (or your sender):
+   - **When a message comes in:** `https://<your-app>.vercel.app/api/whatsapp`
+   - Method: **POST**
+6. Set `PUBLIC_APP_URL` to your Vercel root URL (no `/api/whatsapp` suffix)
 
-**Outbound messages outside the 24-hour window** (cron settlements, KYC approval, etc.) may require approved **message templates** in Meta Business Manager. User-initiated conversations (customer messages first) work with free-form replies for 24 hours.
+### 2b. PayLink PWA
+
+1. Run `db/migrations/003_app_documents.sql` in Supabase (stores KYC uploads from the web app)
+2. Set `APP_SESSION_SECRET` in Vercel (long random string)
+3. Deploy — customers open `https://<your-app>.vercel.app/` on mobile
+4. **Install:** Chrome/Edge → menu → **Install app**; iOS Safari → Share → **Add to Home Screen**
+5. Login: enter phone → 6-digit code sent via **WhatsApp** (same Twilio number)
+
+The PWA reuses the same menu/state machine as WhatsApp — type `menu`, tap quick replies, or upload KYC documents with the 📎 button.
 
 ### 3. Yellow Card
 
@@ -640,7 +643,7 @@ Real phone numbers in sandbox may stay **pending** indefinitely. Production bank
 1. Push to GitHub and import in Vercel
 2. Add all variables from `.env.example`
 3. Set `PUBLIC_APP_URL` to your Vercel URL (no trailing slash) and redeploy
-4. Configure Meta and YC webhooks with the live URL
+4. Configure Twilio and YC webhooks with the live URL
 
 ### 6. Cron poller (required for automatic PDF receipts)
 
@@ -682,9 +685,8 @@ See `.env.example` for the full list:
 
 | Variable | Purpose |
 |----------|---------|
-| `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` | Meta WhatsApp Cloud API |
-| `WHATSAPP_APP_SECRET` / `WHATSAPP_VERIFY_TOKEN` | Meta webhook verify + signature |
-| `WHATSAPP_BUSINESS_ACCOUNT_ID` | Optional WABA id |
+| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_WHATSAPP_NUMBER` | Twilio WhatsApp |
+| `APP_SESSION_SECRET` | PWA customer login + OTP signing |
 | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Database |
 | `YELLOWCARD_API_KEY` / `YELLOWCARD_SECRET_KEY` / `YELLOWCARD_BASE_URL` | Payments API + webhook HMAC |
 | `PAYLINK_YC_FEE_MULTIPLIER` | Service fee multiplier on YC disbursement fee — customer pays this × YC fee; PayLink keeps `(multiplier − 1) × YC fee` (default `1.5`) — applies to sends and invoice payments |
@@ -761,7 +763,7 @@ Set `SENTRY_DSN` in Vercel production env. Errors from WhatsApp, Yellow Card web
 - **Recipient identity resolution is bank-only on Yellow Card's side** — `POST /business/details/bank` has no mobile-money equivalent, so momo recipients get a manual name-confirmation prompt instead of an API-verified one. Bank resolution itself is also only guaranteed for select countries per Yellow Card's docs; unsupported/errored lookups fail soft into the same manual-confirm flow rather than blocking the send
 - **Cross-border sends are momo-only** — the recipient's country/currency is deduced from their momo number's dial code; bank cross-border sends still require the sender to manually pick the recipient's currency (no way to infer it from a bare bank account number)
 - **Cross-border FX margin** — dynamic per transaction (2% standard, 1% VIP corridor — see Workflow 3), not the static per-user `fx_margin_pct` column (that column is used only for invoice payments' own settlement-quote leg, Workflow 4 — a separate rate concept from the wallet-bridging margin)
-- **No rate limiting** on webhooks beyond Meta signature + `CRON_SECRET`
+- **No rate limiting** on webhooks beyond Twilio signature + `CRON_SECRET`
 - **YC API retries** — transient failures surface as user-visible errors; wallet refunds on failed debits where applicable
 - **Old pending transactions** from before payload fixes may need Yellow Card support to cancel
 
@@ -799,7 +801,7 @@ Run this matrix on **production Yellow Card** before go-live (not sandbox):
 ## Tech stack
 
 - **Runtime:** Node.js serverless functions on Vercel
-- **Messaging:** Meta WhatsApp Cloud API
+- **Messaging:** Twilio WhatsApp + PayLink PWA (`/`)
 - **Database:** Supabase (PostgreSQL)
 - **Payments:** Yellow Card API (HMAC auth, live quotes, receive + send)
 - **FX quotes & send fees:** `lib/quotes.js` (domestic/cross-border send fee model for Workflow 3; shared bridging math reused by cross-currency invoice payments in Workflow 4; live-quote margin + expiry handling for Workflow 4's own settlement leg)

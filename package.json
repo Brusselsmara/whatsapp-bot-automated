@@ -2,7 +2,7 @@
   "name": "whatsapp-payments-bot",
   "version": "1.0.0",
   "private": true,
-  "description": "WhatsApp bot for cross-border payments and invoice settlement (BW/ZA/ZM)",
+  "description": "PayLink — WhatsApp bot + installable web app for cross-border payments (BW/ZA/ZM and 19 corridors)",
   "scripts": {
     "dev": "vercel dev",
     "test": "jest",
@@ -11,8 +11,9 @@
   "dependencies": {
     "@sentry/node": "^8.47.0",
     "@supabase/supabase-js": "^2.45.4",
-    "uuid": "^9.0.1",
-    "pdfkit": "^0.15.0"
+    "pdfkit": "^0.15.0",
+    "twilio": "^5.13.1",
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
     "dotenv": "^16.4.5",

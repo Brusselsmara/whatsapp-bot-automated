@@ -45,6 +45,10 @@ alter table users add column if not exists fx_margin_pct numeric(6,4) default 0.
 alter table users add column if not exists home_currency text;
 alter table users add column if not exists home_country text;
 
+-- WhatsApp customer service window (24h after last inbound) + PWA activation
+alter table users add column if not exists last_whatsapp_inbound_at timestamptz;
+alter table users add column if not exists pwa_activated_at timestamptz;
+
 -- ============================================================
 -- KYC SUBMISSIONS — one row per registration attempt, holds the
 -- document links and the approve/reject token you click in email

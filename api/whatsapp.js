@@ -3,6 +3,7 @@ const twilio = require('twilio');
 const { handleIncomingMessage } = require('../lib/conversation');
 const { getPublicAppUrl } = require('../lib/app-url');
 const { captureError } = require('../lib/observability');
+const { recordWhatsAppInbound } = require('../lib/customer-service-window');
 
 // Paste this URL into Twilio Console → Messaging → WhatsApp Sender → webhook:
 //   https://<your-vercel-app>.vercel.app/api/whatsapp
@@ -78,6 +79,7 @@ module.exports = async (req, res) => {
 
   let reply;
   try {
+    await recordWhatsAppInbound(fromPhone);
     reply = await handleIncomingMessage(fromPhone, text, mediaUrls);
   } catch (err) {
     captureError(err, { handler: 'whatsapp', fromPhone, text });

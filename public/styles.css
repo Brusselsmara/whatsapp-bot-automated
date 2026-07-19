@@ -124,6 +124,16 @@ button, .attach-btn {
   border-radius: 10px;
 }
 
+.notice {
+  margin-top: 12px;
+  color: #1e3a8a;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  padding: 10px 12px;
+  border-radius: 10px;
+  line-height: 1.45;
+}
+
 .hidden { display: none !important; }
 
 #chatView {

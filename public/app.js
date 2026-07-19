@@ -8,6 +8,7 @@ const chatForm = document.getElementById('chatForm');
 const messagesEl = document.getElementById('messages');
 const quickRepliesEl = document.getElementById('quickReplies');
 const loginError = document.getElementById('loginError');
+const activationNotice = document.getElementById('activationNotice');
 const logoutBtn = document.getElementById('logoutBtn');
 const statusBar = document.getElementById('statusBar');
 const fileInput = document.getElementById('fileInput');
@@ -23,6 +24,26 @@ function showError(msg) {
 function clearError() {
   loginError.textContent = '';
   loginError.classList.add('hidden');
+  activationNotice.textContent = '';
+  activationNotice.classList.add('hidden');
+}
+
+function showActivationNotice(message) {
+  activationNotice.textContent = message;
+  activationNotice.classList.remove('hidden');
+}
+
+function showGateError(err) {
+  showError(err.message);
+  if (err.data?.code === 'PWA_NOT_ACTIVATED') {
+    showActivationNotice(
+      'Step 1: Open WhatsApp and message PayLink. Step 2: Reply app. Step 3: Return here and tap Send code.'
+    );
+  } else if (err.data?.code === 'CSW_CLOSED') {
+    showActivationNotice(
+      'Your 24-hour WhatsApp session expired. Message PayLink on WhatsApp again (reply app), then sign in here.'
+    );
+  }
 }
 
 function formatBotText(text) {
@@ -130,7 +151,24 @@ loginForm.addEventListener('submit', async (e) => {
       showError(`Dev mode code: ${data.devCode}`);
     }
   } catch (err) {
-    showError(err.message);
+    showGateError(err);
+  }
+});
+
+document.getElementById('phone').addEventListener('blur', async (e) => {
+  const phone = e.target.value.trim();
+  if (!phone) return;
+  try {
+    const data = await api(`?action=activation-status&phone=${encodeURIComponent(phone)}`);
+    if (data.pwaAccess?.canSendPwaOtp) {
+      showActivationNotice('WhatsApp app access is active — you can request a login code.');
+    } else if (!data.pwaAccess?.activated) {
+      showActivationNotice('Reply app on WhatsApp first to activate the PayLink web app.');
+    } else if (!data.pwaAccess?.cswOpen) {
+      showActivationNotice('Message PayLink on WhatsApp again (reply app) to refresh your 24-hour access.');
+    }
+  } catch {
+    /* ignore lookup errors while typing */
   }
 });
 

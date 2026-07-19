@@ -616,11 +616,20 @@ Real phone numbers in sandbox may stay **pending** indefinitely. Production bank
 
 ### 2b. PayLink PWA
 
-1. Run `db/migrations/003_app_documents.sql` in Supabase (stores KYC uploads from the web app)
+1. Run `db/migrations/003_app_documents.sql` and `db/migrations/004_pwa_csw.sql` in Supabase
 2. Set `APP_SESSION_SECRET` in Vercel (long random string)
 3. Deploy — customers open `https://<your-app>.vercel.app/` on mobile
 4. **Install:** Chrome/Edge → menu → **Install app**; iOS Safari → Share → **Add to Home Screen**
-5. Login: enter phone → 6-digit code sent via **WhatsApp** (same Twilio number)
+
+**Customer activation (required — keeps Twilio inside WhatsApp CSW):**
+
+1. Customer messages your PayLink **WhatsApp number**
+2. Customer replies **`app`** (also accepts `pwa`, `web`, `activate`)
+3. Bot sends the PWA link — this opens the **24-hour customer service window**
+4. Within 24 hours, customer opens the PWA, enters the same phone number, and receives the login code **on WhatsApp**
+5. After 24 hours without messaging WhatsApp, they must message again (reply **`app`**) before the PWA can send another login code
+
+The PWA chat itself uses `/api/app` (no Twilio). **Only the login OTP** uses Twilio, and only when CSW is open after customer activation.
 
 The PWA reuses the same menu/state machine as WhatsApp — type `menu`, tap quick replies, or upload KYC documents with the 📎 button.
 

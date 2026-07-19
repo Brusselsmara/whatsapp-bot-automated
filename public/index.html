@@ -23,7 +23,8 @@
     <main id="main">
       <section id="loginView" class="panel">
         <h1>Sign in</h1>
-        <p class="lead">Use your mobile number. We’ll send a login code to your WhatsApp.</p>
+        <p class="lead">First, message PayLink on WhatsApp and reply <strong>app</strong> to activate. Then sign in here within 24 hours — your login code is sent on WhatsApp.</p>
+        <div id="activationNotice" class="notice hidden"></div>
         <form id="loginForm">
           <label for="phone">Mobile number</label>
           <input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+26771234567" required>

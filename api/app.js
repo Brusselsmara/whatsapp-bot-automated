@@ -10,6 +10,7 @@ const {
 } = require('../lib/app-auth');
 const { storeWebDocument } = require('../lib/web-media');
 const { captureError } = require('../lib/observability');
+const { PwaTwilioGateError, getPwaAccessStatus } = require('../lib/customer-service-window');
 const yc = require('../lib/yellowcard');
 
 module.exports.config = { api: { bodyParser: false } };
@@ -95,6 +96,16 @@ async function handleGet(req, res) {
     return json(res, 200, { ok: true, service: 'paylink-app' });
   }
 
+  if (action === 'activation-status') {
+    const queryPhone = normalizePhone(req.query.phone);
+    if (!queryPhone) return json(res, 400, { error: 'phone query parameter required' });
+    if (!yc.isSupportedWhatsAppNumber(queryPhone)) {
+      return json(res, 400, { error: 'PayLink is not available for this country code yet.' });
+    }
+    const pwaAccess = await getPwaAccessStatus(queryPhone);
+    return json(res, 200, { phone: queryPhone, pwaAccess });
+  }
+
   const phone = getPhoneFromSession(req);
   if (!phone) {
     return json(res, 401, { error: 'Not logged in' });
@@ -103,10 +114,12 @@ async function handleGet(req, res) {
   if (action === 'me') {
     const user = await getOrCreateUser(phone);
     const session = await getSession(phone);
+    const pwaAccess = await getPwaAccessStatus(phone);
     return json(res, 200, {
       user: sanitizeUser(user),
       session: { state: session.state, context: session.context || {} },
       supported: yc.isSupportedWhatsAppNumber(phone),
+      pwaAccess,
     });
   }
 
@@ -150,14 +163,26 @@ async function handleLogin(body, res) {
     return json(res, 400, { error: 'PayLink is not available for this country code yet.' });
   }
 
-  const result = await issueOtp(phone);
-  return json(res, 200, {
-    ok: true,
-    phone: result.phone,
-    otpToken: result.otpToken,
-    message: 'We sent a 6-digit code to your WhatsApp number.',
-    devCode: result.devCode,
-  });
+  try {
+    const result = await issueOtp(phone);
+    return json(res, 200, {
+      ok: true,
+      phone: result.phone,
+      otpToken: result.otpToken,
+      message: 'We sent a 6-digit code to your WhatsApp number.',
+      devCode: result.devCode,
+    });
+  } catch (err) {
+    if (err instanceof PwaTwilioGateError) {
+      const pwaAccess = await getPwaAccessStatus(phone);
+      return json(res, 403, {
+        error: err.message,
+        code: err.code,
+        pwaAccess,
+      });
+    }
+    throw err;
+  }
 }
 
 async function handleVerify(body, res) {

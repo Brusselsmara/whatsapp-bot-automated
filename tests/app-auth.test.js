@@ -2,6 +2,10 @@ jest.mock('../lib/whatsapp', () => ({
   sendWhatsApp: jest.fn().mockResolvedValue({ sid: 'SM123' }),
 }));
 
+jest.mock('../lib/customer-service-window', () => ({
+  assertPwaTwilioAllowed: jest.fn().mockResolvedValue({ canSendPwaOtp: true }),
+}));
+
 const { sendWhatsApp } = require('../lib/whatsapp');
 const {
   isAppAuthConfigured,

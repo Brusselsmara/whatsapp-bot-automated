@@ -7,6 +7,8 @@ const {
   countriesForCurrency,
   getSendCorridors,
   getRegisterableCorridors,
+  sendChannelTypesForCurrency,
+  getCorridorsForPicker,
 } = require('../lib/yellowcard');
 
 describe('country corridors (YC Addendum 1)', () => {
@@ -52,5 +54,21 @@ describe('country corridors (YC Addendum 1)', () => {
   it('filters corridor picker by currency', () => {
     const xof = parseCorridorPickerChoice('1', { currency: 'XOF' });
     expect(xof.currency).toBe('XOF');
+  });
+
+  it('filters corridor picker by payment channel', () => {
+    const bankOnly = getCorridorsForPicker({ channelType: 'bank' });
+    const momoOnly = getCorridorsForPicker({ channelType: 'momo' });
+    expect(bankOnly.every((c) => c.channelTypes.includes('bank'))).toBe(true);
+    expect(momoOnly.every((c) => c.channelTypes.includes('momo'))).toBe(true);
+    expect(bankOnly.some((c) => c.country === 'NG')).toBe(true);
+    expect(momoOnly.some((c) => c.country === 'NG')).toBe(false);
+    expect(parseCorridorPickerChoice('1', { channelType: 'bank' }).country).toBe(bankOnly[0].country);
+  });
+
+  it('lists send channels available per currency', () => {
+    expect(sendChannelTypesForCurrency('XOF')).toEqual(['momo']);
+    expect(sendChannelTypesForCurrency('BWP').sort()).toEqual(['bank', 'momo'].sort());
+    expect(sendChannelTypesForCurrency('NGN')).toEqual(['bank']);
   });
 });

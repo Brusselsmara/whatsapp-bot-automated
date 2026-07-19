@@ -1,4 +1,4 @@
-const { handleIncomingMessage, getSession, getOrCreateUser } = require('../lib/conversation');
+const { handleIncomingMessage, getSession, getOrCreateUser, settlePending } = require('../lib/conversation');
 const {
   isAppAuthConfigured,
   issueOtp,
@@ -111,6 +111,7 @@ async function handleGet(req, res) {
   }
 
   if (action === 'me') {
+    await settlePending(phone);
     const user = await getOrCreateUser(phone);
     const session = await getSession(phone);
     const pwaAccess = await getPwaAccessStatus(phone);
@@ -125,6 +126,7 @@ async function handleGet(req, res) {
   }
 
   if (action === 'notifications') {
+    await settlePending(phone);
     const unreadOnly = req.query.unread === '1';
     const [notifications, unreadCount] = await Promise.all([
       listNotifications(phone, { unreadOnly }),

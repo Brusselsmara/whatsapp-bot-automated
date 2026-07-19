@@ -29,7 +29,12 @@ body {
 
 body.chat-active {
   overflow: hidden;
-  height: 100dvh;
+  height: 100%;
+}
+
+html.chat-active {
+  overflow: hidden;
+  height: 100%;
 }
 
 #app {
@@ -39,6 +44,7 @@ body.chat-active {
   height: 100dvh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .topbar {
@@ -80,7 +86,13 @@ body.chat-active {
 .logo { font-weight: 800; font-size: 1.1rem; color: var(--primary); }
 .tagline { font-size: .75rem; color: var(--muted); }
 
-main { flex: 1; display: flex; flex-direction: column; }
+main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
 
 .panel {
   margin: 24px 16px;
@@ -88,6 +100,7 @@ main { flex: 1; display: flex; flex-direction: column; }
   background: var(--surface);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
+  overflow-y: auto;
 }
 
 .panel h1 { margin: 0 0 8px; font-size: 1.5rem; }
@@ -185,10 +198,12 @@ button, .attach-btn {
 }
 
 .messages {
-  flex: 1;
+  flex: 1 1 auto;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   padding: 16px;
   display: flex;
   flex-direction: column;

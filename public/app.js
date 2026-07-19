@@ -112,10 +112,34 @@ function focusComposer() {
   }
 }
 
+function userFacingClientError(msg) {
+  const text = String(msg || '');
+  if (/yellow\s*card|yellowcard|yc\s+api/i.test(text)) {
+    return 'Something went wrong. Please try again.';
+  }
+  return text || 'Something went wrong.';
+}
+
 function scrollMessagesToEnd() {
   requestAnimationFrame(() => {
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    requestAnimationFrame(() => {
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      const last = messagesEl.lastElementChild;
+      if (last?.scrollIntoView) {
+        last.scrollIntoView({ block: 'end', behavior: 'auto' });
+      }
+    });
   });
+}
+
+function afterChatUpdate({ focusInput = true } = {}) {
+  scrollMessagesToEnd();
+  const docUpload = chatSessionState === 'register_documents';
+  if (focusInput && !docUpload) {
+    focusComposer();
+  } else if (docUpload) {
+    messageInput.blur();
+  }
 }
 
 function showError(msg) {
@@ -193,7 +217,7 @@ async function api(path, options = {}) {
   try { data = await res.json(); } catch { /* empty */ }
 
   if (!res.ok) {
-    const err = new Error(data.error || `Request failed (${res.status})`);
+    const err = new Error(userFacingClientError(data.error || `Request failed (${res.status})`));
     err.status = res.status;
     err.data = data;
     throw err;
@@ -206,6 +230,7 @@ function showChat() {
   chatView.classList.remove('hidden');
   logoutBtn.classList.remove('hidden');
   notificationsBtn.classList.remove('hidden');
+  document.documentElement.classList.add('chat-active');
   document.body.classList.add('chat-active');
   startNotificationPolling();
 }
@@ -216,6 +241,7 @@ function showLogin() {
   logoutBtn.classList.add('hidden');
   notificationsBtn.classList.add('hidden');
   notificationsPanel.classList.add('hidden');
+  document.documentElement.classList.remove('chat-active');
   document.body.classList.remove('chat-active');
   stopNotificationPolling();
   messagesEl.innerHTML = '';
@@ -318,7 +344,6 @@ async function sendMessage(text) {
   addBubble(trimmed, 'user', { scroll: true });
   messageInput.value = '';
   quickRepliesEl.innerHTML = '';
-  focusComposer();
 
   try {
     const data = await api('', {
@@ -331,9 +356,9 @@ async function sendMessage(text) {
     updateStatus(data);
     if (typeof data.unreadCount === 'number') updateNotifBadge(data.unreadCount);
   } catch (err) {
-    addBubble(err.message || 'Something went wrong.', 'bot', { scroll: true });
+    addBubble(userFacingClientError(err.message), 'bot', { scroll: true });
   } finally {
-    focusComposer();
+    afterChatUpdate({ focusInput: chatSessionState !== 'register_documents' });
   }
 }
 
@@ -349,7 +374,7 @@ fileInput.addEventListener('change', async () => {
 
   addBubble(`📎 Uploaded ${file.name}`, 'user', { scroll: true });
   quickRepliesEl.innerHTML = '';
-  focusComposer();
+  messageInput.blur();
   const form = new FormData();
   form.append('file', file);
 
@@ -361,9 +386,9 @@ fileInput.addEventListener('change', async () => {
     updateStatus(data);
     if (typeof data.unreadCount === 'number') updateNotifBadge(data.unreadCount);
   } catch (err) {
-    addBubble(err.message || 'Upload failed.', 'bot', { scroll: true });
+    addBubble(userFacingClientError(err.message) || 'Upload failed.', 'bot', { scroll: true });
   } finally {
-    focusComposer();
+    afterChatUpdate({ focusInput: false });
   }
 });
 

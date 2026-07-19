@@ -11,6 +11,7 @@ const {
 const { storeWebDocument } = require('../lib/web-media');
 const { parseQuickReplies } = require('../lib/app-ui');
 const { captureError } = require('../lib/observability');
+const { userFacingErrorMessage } = require('../lib/user-errors');
 const { PwaTwilioGateError, getPwaAccessStatus } = require('../lib/customer-service-window');
 const {
   listNotifications,
@@ -84,7 +85,7 @@ module.exports = async (req, res) => {
     return json(res, 405, { error: 'Method not allowed' });
   } catch (err) {
     captureError(err, { handler: 'app' });
-    return json(res, 500, { error: err.message || 'Internal error' });
+    return json(res, 500, { error: userFacingErrorMessage(err, 'Something went wrong. Please try again.') });
   }
 };
 

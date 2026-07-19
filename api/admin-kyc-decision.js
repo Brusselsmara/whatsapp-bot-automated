@@ -1,7 +1,7 @@
 const { supabase } = require('../lib/db');
-const { sendWhatsApp } = require('../lib/whatsapp');
+const { notifyUser } = require('../lib/notifications');
 const yc = require('../lib/yellowcard');
-const { buildFeeScheduleUrl, formatKycApprovalMessage } = require('../lib/fee-schedule');
+const { buildFeeScheduleUrl, formatKycApprovalNotificationBody } = require('../lib/fee-schedule');
 const { getPublicAppUrl } = require('../lib/app-url');
 
 module.exports = async (req, res) => {
@@ -33,13 +33,11 @@ module.exports = async (req, res) => {
 
   const newStatus = decision === 'approve' ? 'approved' : 'rejected';
 
-  // Update KYC submission
   await supabase
     .from('kyc_submissions')
     .update({ status: newStatus, decided_at: new Date().toISOString() })
     .eq('id', submission.id);
 
-  // Update user KYC status (+ home currency from WhatsApp dial code when possible)
   const detected = yc.detectCountryFromNumber(submission.phone);
   await supabase
     .from('users')
@@ -51,7 +49,6 @@ module.exports = async (req, res) => {
     })
     .eq('phone', submission.phone);
 
-  // Create only the user's single home-currency wallet on approval
   if (newStatus === 'approved') {
     let homeCurrency = detected?.currency;
     if (!homeCurrency) {
@@ -72,39 +69,36 @@ module.exports = async (req, res) => {
         .neq('currency', homeCurrency)
         .eq('balance', 0);
     } else {
-      console.warn(`[KYC] No home currency for ${submission.phone} — wallet will be created on first bot use`);
+      console.warn(`[KYC] No home currency for ${submission.phone} — wallet will be created on first use`);
     }
   }
 
-  // Notify user via WhatsApp
-  if (newStatus === 'approved') {
-    const homeCurrency = detected?.currency;
-    const message = formatKycApprovalMessage({ walletCurrency: homeCurrency });
-    const feeScheduleUrl = getPublicAppUrl() ? buildFeeScheduleUrl() : null;
+  try {
+    if (newStatus === 'approved') {
+      const homeCurrency = detected?.currency;
+      const body = formatKycApprovalNotificationBody({ walletCurrency: homeCurrency });
+      const actionUrl = getPublicAppUrl() ? buildFeeScheduleUrl() : null;
 
-    try {
-      if (feeScheduleUrl) {
-        await sendWhatsApp(submission.phone, message, feeScheduleUrl);
-      } else {
-        console.warn(`[KYC] PUBLIC_APP_URL not set — fee schedule PDF skipped for ${submission.phone}`);
-        await sendWhatsApp(
-          submission.phone,
-          `${message}\n\n_(Fee schedule PDF unavailable — set PUBLIC_APP_URL on your deployment.)_`
-        );
-      }
-    } catch (err) {
-      console.error('Failed to notify user of KYC approval:', err);
+      await notifyUser(submission.phone, {
+        type: 'kyc_approved',
+        title: 'Account verified',
+        body: actionUrl
+          ? body
+          : `${body}\n\n(Fee schedule PDF unavailable — set PUBLIC_APP_URL on your deployment.)`,
+        actionUrl,
+      });
+    } else {
+      await notifyUser(submission.phone, {
+        type: 'kyc_rejected',
+        title: 'Verification not approved',
+        body:
+          'Unfortunately we could not verify your account. Your submitted documents did not meet our requirements. ' +
+          'Open the PayLink app and reply menu to start a new registration, or contact support if you believe this is an error.',
+        actionUrl: getPublicAppUrl() ? `${getPublicAppUrl()}/` : null,
+      });
     }
-  } else {
-    const message =
-      `❌ *Unfortunately we couldn't verify your account.*\n\n` +
-      `Your submitted documents did not meet our verification requirements.\n\n` +
-      `If you believe this is an error, please contact support or reply *"menu"* to start a new registration.`;
-    try {
-      await sendWhatsApp(submission.phone, message);
-    } catch (err) {
-      console.error('Failed to notify user of KYC rejection:', err);
-    }
+  } catch (err) {
+    console.error('Failed to notify user of KYC decision:', err);
   }
 
   res.setHeader('Content-Type', 'text/html');
@@ -114,7 +108,7 @@ module.exports = async (req, res) => {
       <h2 style="color:${newStatus === 'approved' ? '#16a34a' : '#dc2626'}">
         ${newStatus === 'approved' ? '✅ Approved' : '❌ Rejected'}
       </h2>
-      <p><strong>${submission.phone}</strong> has been notified on WhatsApp.</p>
+      <p><strong>${submission.phone}</strong> has been notified in the PayLink app.</p>
       ${newStatus === 'approved'
         ? `<p>Their ${detected ? detected.currency + ' home-currency' : ''} wallet has been created.</p>`
         : ''}

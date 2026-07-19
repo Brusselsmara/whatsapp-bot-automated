@@ -1,5 +1,5 @@
 const { supabase } = require('../lib/db');
-const { sendWhatsApp } = require('../lib/whatsapp');
+const { notifyUser, stripMarkdown } = require('../lib/notifications');
 const { getWebhookSignature, verifyWebhookSignature } = require('../lib/yellowcard');
 const {
   claimTopupCredit,
@@ -86,14 +86,17 @@ async function handleTopupUpdate(txn, status, event) {
         return;
       }
       console.log(`[WEBHOOK] ✅ Topup credited ${result.netAmount} ${result.currency} (gross ${result.amount}, fee ${result.feeAmount}) — balance ${result.newBalance}`);
-      await sendWhatsApp(result.phone,
-        formatTopupSettlementMessage({
+      await notifyUser(result.phone, {
+        type: 'topup_complete',
+        title: 'Top-up complete',
+        body: stripMarkdown(formatTopupSettlementMessage({
           grossAmount: result.amount,
           netAmount: result.netAmount,
           feeAmount: result.feeAmount,
           currency: result.currency,
           newBalance: result.newBalance,
-        }));
+        })),
+      });
     } catch (err) {
       captureError(err, { handler: 'yellowcard-webhook', action: 'claim_topup_credit', txnId: txn.id });
       throw err;
@@ -102,8 +105,11 @@ async function handleTopupUpdate(txn, status, event) {
   } else if (status === 'failed') {
     const result = await markTopupFailed(txn.id, event);
     if (!result.claimed) return;
-    await sendWhatsApp(result.phone,
-      `⚠️ Your top-up of *${result.amount} ${result.currency}* failed. Please reply *menu* to try again.`);
+    await notifyUser(result.phone, {
+      type: 'topup_failed',
+      title: 'Top-up failed',
+      body: `Your top-up of ${result.amount} ${result.currency} failed. Open the PayLink app and try again from the menu.`,
+    });
   } else {
     await supabase.from('transactions')
       .update({ status, updated_at: new Date().toISOString(), raw_response: event })
@@ -143,9 +149,13 @@ async function handleSendUpdate(txn, status, event) {
     }
     console.log(`[WEBHOOK] ↩️ Refunded ${result.amount} ${result.currency} — balance ${result.newBalance}`);
     const { data: fresh } = await supabase.from('transactions').select('recipient_name').eq('id', txn.id).single();
-    await sendWhatsApp(result.phone,
-      `⚠️ Your transfer of *${result.amount} ${result.currency}* to ${fresh?.recipient_name || txn.recipient_name} failed. Your balance has been refunded.`);
-
+    await notifyUser(result.phone, {
+      type: 'send_failed',
+      title: 'Transfer failed',
+      body:
+        `Your transfer of ${result.amount} ${result.currency} to ${fresh?.recipient_name || txn.recipient_name} failed. ` +
+        `Your balance has been refunded. Open the PayLink app to try again.`,
+    });
   } else {
     await supabase.from('transactions')
       .update({ status, updated_at: new Date().toISOString(), raw_response: event })

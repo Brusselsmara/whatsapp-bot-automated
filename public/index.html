@@ -17,7 +17,12 @@
         <span class="logo">PayLink</span>
         <span class="tagline">Payments</span>
       </div>
-      <button id="logoutBtn" class="ghost hidden" type="button">Log out</button>
+      <div class="topbar-actions">
+        <button id="notificationsBtn" class="ghost hidden" type="button" aria-label="Notifications">
+          🔔 <span id="notifBadge" class="notif-badge hidden">0</span>
+        </button>
+        <button id="logoutBtn" class="ghost hidden" type="button">Log out</button>
+      </div>
     </header>
 
     <main id="main">
@@ -43,16 +48,26 @@
       <section id="chatView" class="hidden">
         <div id="statusBar" class="status-bar hidden"></div>
         <div id="messages" class="messages" aria-live="polite"></div>
-        <div id="quickReplies" class="quick-replies"></div>
-        <form id="chatForm" class="composer">
-          <label class="sr-only" for="message">Message</label>
-          <input id="message" name="message" type="text" autocomplete="off" placeholder="Type a message…">
-          <label class="attach-btn" title="Upload document">
-            <input id="fileInput" type="file" accept="image/*,.pdf" hidden>
-            📎
-          </label>
-          <button type="submit" class="primary">Send</button>
-        </form>
+        <div class="chat-footer">
+          <div id="quickReplies" class="quick-replies"></div>
+          <form id="chatForm" class="composer">
+            <label class="sr-only" for="message">Message</label>
+            <input id="message" name="message" type="text" autocomplete="off" placeholder="Type a message…">
+            <label class="attach-btn" title="Upload document">
+              <input id="fileInput" type="file" accept="image/*,.pdf" hidden>
+              📎
+            </label>
+            <button type="submit" class="primary">Send</button>
+          </form>
+        </div>
+        <div id="notificationsPanel" class="notifications-panel hidden" aria-label="Notifications">
+          <div class="notifications-head">
+            <h2>Notifications</h2>
+            <button id="markAllReadBtn" type="button" class="link">Mark all read</button>
+          </div>
+          <div id="notificationsList" class="notifications-list"></div>
+          <p id="notificationsEmpty" class="notifications-empty hidden">No notifications yet.</p>
+        </div>
       </section>
     </main>
   </div>

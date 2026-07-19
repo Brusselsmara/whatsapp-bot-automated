@@ -9,8 +9,15 @@ const {
   normalizePhone,
 } = require('../lib/app-auth');
 const { storeWebDocument } = require('../lib/web-media');
+const { parseQuickReplies } = require('../lib/app-ui');
 const { captureError } = require('../lib/observability');
 const { PwaTwilioGateError, getPwaAccessStatus } = require('../lib/customer-service-window');
+const {
+  listNotifications,
+  countUnreadNotifications,
+  markNotificationRead,
+  markAllNotificationsRead,
+} = require('../lib/notifications');
 const yc = require('../lib/yellowcard');
 
 module.exports.config = { api: { bodyParser: false } };
@@ -50,17 +57,8 @@ function sanitizeUser(user) {
   };
 }
 
-function parseQuickReplies(text) {
-  const replies = [];
-  const lines = String(text || '').split('\n');
-  for (const line of lines) {
-    const m = line.match(/^(\d+)️⃣\s*(.+)$/) || line.match(/^(\d+)[\.)]\s*(.+)$/);
-    if (m) replies.push({ value: m[1], label: m[2].trim() });
-  }
-  if (replies.length === 0 && /reply\s+"?1"?/i.test(text)) {
-    replies.push({ value: '1', label: 'Register' });
-  }
-  return replies;
+function parseQuickRepliesForSession(reply, session) {
+  return parseQuickReplies(reply, session);
 }
 
 module.exports = async (req, res) => {
@@ -115,12 +113,23 @@ async function handleGet(req, res) {
     const user = await getOrCreateUser(phone);
     const session = await getSession(phone);
     const pwaAccess = await getPwaAccessStatus(phone);
+    const unreadCount = await countUnreadNotifications(phone);
     return json(res, 200, {
       user: sanitizeUser(user),
       session: { state: session.state, context: session.context || {} },
       supported: yc.isSupportedWhatsAppNumber(phone),
       pwaAccess,
+      unreadCount,
     });
+  }
+
+  if (action === 'notifications') {
+    const unreadOnly = req.query.unread === '1';
+    const [notifications, unreadCount] = await Promise.all([
+      listNotifications(phone, { unreadOnly }),
+      countUnreadNotifications(phone),
+    ]);
+    return json(res, 200, { notifications, unreadCount });
   }
 
   return json(res, 400, { error: 'Unknown action' });
@@ -151,6 +160,10 @@ async function handlePost(req, res) {
       return json(res, 200, { ok: true });
     case 'message':
       return handleMessage(body, req, res);
+    case 'mark-notification-read':
+      return handleMarkNotificationRead(body, req, res);
+    case 'mark-all-notifications-read':
+      return handleMarkAllNotificationsRead(req, res);
     default:
       return json(res, 400, { error: 'Unknown action' });
   }
@@ -226,10 +239,35 @@ async function handleMessage(body, req, res) {
   const session = await getSession(phone);
   return json(res, 200, {
     reply,
-    quickReplies: parseQuickReplies(reply),
+    quickReplies: parseQuickRepliesForSession(reply, session),
     user: sanitizeUser(user),
     session: { state: session.state },
+    unreadCount: await countUnreadNotifications(phone),
   });
+}
+
+async function handleMarkNotificationRead(body, req, res) {
+  const phone = getPhoneFromSession(req);
+  if (!phone) return json(res, 401, { error: 'Not logged in' });
+
+  const id = body.id;
+  if (!id) return json(res, 400, { error: 'Notification id is required.' });
+
+  const ok = await markNotificationRead(phone, id);
+  if (!ok) return json(res, 404, { error: 'Notification not found.' });
+
+  return json(res, 200, {
+    ok: true,
+    unreadCount: await countUnreadNotifications(phone),
+  });
+}
+
+async function handleMarkAllNotificationsRead(req, res) {
+  const phone = getPhoneFromSession(req);
+  if (!phone) return json(res, 401, { error: 'Not logged in' });
+
+  await markAllNotificationsRead(phone);
+  return json(res, 200, { ok: true, unreadCount: 0 });
 }
 
 async function handleUpload(req, res) {
@@ -268,8 +306,9 @@ async function handleUpload(req, res) {
     ok: true,
     ref,
     reply,
-    quickReplies: parseQuickReplies(reply),
+    quickReplies: parseQuickRepliesForSession(reply, session),
     session: { state: session.state },
+    unreadCount: await countUnreadNotifications(phone),
   });
 }
 

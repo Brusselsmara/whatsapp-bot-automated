@@ -1,13 +1,13 @@
 /**
  * Handles "Request More Info" clicks from the KYC review email.
  * Shows a simple HTML form where the admin can optionally add a note,
- * then sends a WhatsApp message back to the applicant asking for
- * missing documents.
+ * then sends a PayLink app notification asking for missing documents.
  */
 
 const { supabase } = require('../lib/db');
-const { sendWhatsApp } = require('../lib/whatsapp');
-const { getMissingDocsMessage } = require('../lib/email');
+const { notifyUser } = require('../lib/notifications');
+const { getMissingDocsNotificationBody } = require('../lib/email');
+const { getPublicAppUrl } = require('../lib/app-url');
 
 module.exports = async (req, res) => {
   const { token } = req.query;
@@ -76,7 +76,7 @@ module.exports = async (req, res) => {
         </div>
 
         <p>
-          A WhatsApp message will be sent to <strong>${phone}</strong> listing all required
+          A notification will be sent in the <strong>PayLink app</strong> for <strong>${phone}</strong> listing all required
           documents and your note below. The submission will remain in <em>pending</em> state
           so you can review again once they re-submit.
         </p>
@@ -89,14 +89,14 @@ module.exports = async (req, res) => {
           <textarea id="note" name="note" placeholder="e.g. Your proof of address is older than 3 months — please send a more recent one."></textarea>
           <p class="hint">Leave blank to send only the standard document checklist.</p>
 
-          <button type="submit">📤 Send Request via WhatsApp</button>
+          <button type="submit">📤 Send request in PayLink app</button>
         </form>
       </body>
       </html>
     `);
   }
 
-  // ── POST: process the form, send WhatsApp message ──────────────────────────
+  // ── POST: process the form, send PayLink app notification ──────────────────
   if (req.method === 'POST') {
     const { data: submission } = await supabase
       .from('kyc_submissions')
@@ -163,19 +163,22 @@ module.exports = async (req, res) => {
       },
       { onConflict: 'phone' });
 
-    // Send WhatsApp message to the user
-    const message = getMissingDocsMessage(accountType, note);
+    const body = getMissingDocsNotificationBody(accountType, note);
 
     try {
-      await sendWhatsApp(phone, message);
+      await notifyUser(phone, {
+        type: 'kyc_more_info',
+        title: 'More documents needed',
+        body,
+        actionUrl: getPublicAppUrl() ? `${getPublicAppUrl()}/` : null,
+      });
     } catch (err) {
-      console.error('Failed to send WhatsApp more-info message:', err);
+      console.error('Failed to send PWA more-info notification:', err);
       return res.status(500).send(`
         <html><body style="font-family:sans-serif;padding:40px;max-width:500px;margin:auto">
-          <h2 style="color:#dc2626">⚠️ WhatsApp send failed</h2>
-          <p>The database was updated but the WhatsApp message to <strong>${phone}</strong> 
+          <h2 style="color:#dc2626">⚠️ Notification failed</h2>
+          <p>The database was updated but the PayLink app notification for <strong>${phone}</strong>
           could not be sent. Error: ${err.message}</p>
-          <p>Please message them manually.</p>
         </body></html>
       `);
     }
@@ -185,7 +188,7 @@ module.exports = async (req, res) => {
       <html>
       <body style="font-family:sans-serif;padding:40px;max-width:500px;margin:auto">
         <h2 style="color:#d97706">📋 More Info Requested</h2>
-        <p><strong>${name}</strong> (${phone}) has been messaged on WhatsApp.</p>
+        <p><strong>${name}</strong> (${phone}) has been notified in the PayLink app.</p>
         <p>Their submission remains under review — once they re-send documents, 
         a new KYC email will arrive for you to action.</p>
         ${note ? `<p><strong>Your note sent:</strong><br><em>${note}</em></p>` : ''}

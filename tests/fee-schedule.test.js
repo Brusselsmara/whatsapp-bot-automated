@@ -9,12 +9,12 @@ describe('fee schedule', () => {
     expect(buf.subarray(0, 4).toString()).toBe('%PDF');
   });
 
-  it('formatKycApprovalMessage mentions fee schedule and menu', () => {
+  it('formatKycApprovalMessage mentions fee schedule and PayLink app', () => {
     const msg = formatKycApprovalMessage({ walletCurrency: 'BWP' });
     expect(msg).toMatch(/verified/i);
-    expect(msg).toMatch(/Fee Schedule/i);
+    expect(msg).toMatch(/fee schedule/i);
     expect(msg).toMatch(/BWP/);
-    expect(msg).toMatch(/menu/i);
+    expect(msg).toMatch(/app/i);
     expect(msg).not.toMatch(/Yellow Card|YC/i);
   });
 

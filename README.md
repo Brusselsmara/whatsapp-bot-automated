@@ -47,7 +47,7 @@ Customer PWA (/) ──► /api/app.js ─────────────�
               │                 ▼
               │     /api/yellowcard-webhook.js
               │                 │
-              └────────► Twilio WhatsApp reply + PDF receipt
+              └────────► Twilio WhatsApp reply (inbound bot only) + PWA notification inbox (receipts, KYC, settlements)
                          (PWA shows replies in-browser)
 ```
 
@@ -251,9 +251,9 @@ flowchart TD
 1. User record saved with `kyc_status = pending_review`
 2. Documents stored in `kyc_submissions` (Twilio media URLs or PWA refs `web:{uuid}`)
 3. Admin receives email (Resend) with attachments and three actions:
-   - **Approve** → `kyc_status = approved`, home-currency wallet created at 0, WhatsApp welcome message
-   - **Reject** → `kyc_status = rejected`, user notified
-   - **Request More Info** → admin adds optional note, user gets WhatsApp checklist to resubmit
+   - **Approve** → `kyc_status = approved`, home-currency wallet created at 0, PayLink app notification with fee schedule link
+   - **Reject** → `kyc_status = rejected`, user notified in the PayLink app
+   - **Request More Info** → admin adds optional note, user gets an in-app notification to resubmit
 
 Until approved, only the welcome screen and help text are available — no payments.
 
@@ -353,7 +353,7 @@ flowchart TD
     S --> T[YC submitSend + full KYC]
     T --> V[Transaction pending in DB]
     V --> W{YC completes?}
-    W -->|yes| X[PDF receipt via WhatsApp]
+    W -->|yes| X[PDF receipt via PayLink app notification]
     W -->|failed| Y[Wallet refunded]
 ```
 
@@ -437,7 +437,7 @@ When Yellow Card marks the send **complete**:
 
 1. Transaction status → `completed`
 2. PDF receipt generated at `/api/receipt?id=<txn_uuid>`
-3. WhatsApp message + PDF attachment sent to payer
+3. PayLink app notification with signed receipt link sent to payer
 4. `receipt_sent` flag set (prevents duplicates)
 
 If send **fails** → wallet amount refunded, user notified.
@@ -616,7 +616,7 @@ Real phone numbers in sandbox may stay **pending** indefinitely. Production bank
 
 ### 2b. PayLink PWA
 
-1. Run `db/migrations/003_app_documents.sql` and `db/migrations/004_pwa_csw.sql` in Supabase
+1. Run `db/migrations/003_app_documents.sql`, `004_pwa_csw.sql`, and `005_user_notifications.sql` in Supabase
 2. Set `APP_SESSION_SECRET` in Vercel (long random string)
 3. Deploy — customers open `https://<your-app>.vercel.app/` on mobile
 4. **Install:** Chrome/Edge → menu → **Install app**; iOS Safari → Share → **Add to Home Screen**
@@ -632,6 +632,14 @@ Real phone numbers in sandbox may stay **pending** indefinitely. Production bank
 The PWA chat itself uses `/api/app` (no Twilio). **Only the login OTP** uses Twilio, and only when CSW is open after customer activation.
 
 The PWA reuses the same menu/state machine as WhatsApp — type `menu`, tap quick replies, or upload KYC documents with the 📎 button.
+
+**In-app notifications (no WhatsApp fallback):**
+
+KYC approve/reject/more-info, receipts, top-up/settlement updates, and marketing messages are stored in the PWA **bell inbox** (`user_notifications` table). Customers must open the app to see them — nothing is sent proactively on WhatsApp except the login code.
+
+- Bell icon + unread badge in the PWA header (polls every 60s)
+- Tap a notification to mark read and open links (e.g. receipt PDF, fee schedule)
+- KYC registration copy tells users they'll hear back **in the PayLink app**, not on WhatsApp
 
 ### 3. Yellow Card
 
@@ -672,7 +680,7 @@ Or send header `x-cron-secret: <CRON_SECRET>` (no secret in URL).
 |---------------|--------|
 | Top-up not yet credited | Poll YC → credit wallet → WhatsApp confirmation |
 | Send / invoice payment still processing | Poll YC → mark complete or refund wallet |
-| Send completed but no PDF yet (`receipt_sent = false`) | Generate signed receipt URL → WhatsApp message + PDF attachment |
+| Send completed but no PDF yet (`receipt_sent = false`) | Generate signed receipt URL → PayLink app notification with link |
 
 Without this cron, customers who initiate a send or invoice payment and then **do not message again** may not receive their PDF receipt until they return (webhooks and per-message polling only run when something else triggers the app).
 

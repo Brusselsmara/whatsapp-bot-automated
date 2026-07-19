@@ -1,5 +1,5 @@
 const { supabase } = require('../lib/db');
-const { sendWhatsApp } = require('../lib/whatsapp');
+const { notifyUser, stripMarkdown } = require('../lib/notifications');
 const yc = require('../lib/yellowcard');
 const {
   claimTopupCredit,
@@ -17,7 +17,7 @@ const { captureError } = require('../lib/observability');
  * Cron safety net for ALL users — no inbound WhatsApp message required:
  * - Pending top-ups → credit wallet + notify
  * - Pending sends / invoice payments → mark complete or refund
- * - Completed sends with receipt_sent=false → deliver PDF receipt via WhatsApp
+ * - Completed sends with receipt_sent=false → deliver PDF receipt via PWA notification
  *
  * Protected by CRON_SECRET env var. Schedule every 2–5 min via cron-job.org.
  */
@@ -142,15 +142,17 @@ async function creditWallet(txn, ycData) {
     }
 
     console.log(`[POLL] ✅ Credited ${result.netAmount} ${result.currency} (gross ${result.amount}, fee ${result.feeAmount}) — balance ${result.newBalance}`);
-    await sendWhatsApp(result.phone,
-      `${formatTopupSettlementMessage({
+    await notifyUser(result.phone, {
+      type: 'topup_complete',
+      title: 'Top-up complete',
+      body: stripMarkdown(formatTopupSettlementMessage({
         grossAmount: result.amount,
         netAmount: result.netAmount,
         feeAmount: result.feeAmount,
         currency: result.currency,
         newBalance: result.newBalance,
-      })}\n\nReply *menu* to continue.`);
-
+      })),
+    });
     return `credited: ${result.newBalance}`;
   } catch (err) {
     console.error(`[POLL] claim_topup_credit failed for ${txn.id}:`, err.message);
@@ -162,8 +164,11 @@ async function failTopup(txn, ycData) {
   const result = await markTopupFailed(txn.id, ycData);
   if (!result.claimed) return 'already_failed';
 
-  await sendWhatsApp(result.phone,
-    `⚠️ Your top-up of *${result.amount} ${result.currency}* could not be completed. Please reply *menu* to try again.`);
+  await notifyUser(result.phone, {
+    type: 'topup_failed',
+    title: 'Top-up failed',
+    body: `Your top-up of ${result.amount} ${result.currency} could not be completed. Open the PayLink app and try again from the menu.`,
+  });
   return 'failed';
 }
 
@@ -199,8 +204,12 @@ async function failSend(txn, ycData) {
 
   console.log(`[POLL] ↩️ Refunded ${result.amount} ${result.currency} — balance ${result.newBalance}`);
   const { data: fresh } = await supabase.from('transactions').select('recipient_name').eq('id', txn.id).single();
-  await sendWhatsApp(result.phone,
-    `⚠️ Your transfer of *${result.amount} ${result.currency}* to ${fresh?.recipient_name || txn.recipient_name} failed. Your balance has been refunded.`);
-
+  await notifyUser(result.phone, {
+    type: 'send_failed',
+    title: 'Transfer failed',
+    body:
+      `Your transfer of ${result.amount} ${result.currency} to ${fresh?.recipient_name || txn.recipient_name} failed. ` +
+      `Your balance has been refunded. Open the PayLink app to try again.`,
+  });
   return 'send_failed_refunded';
 }

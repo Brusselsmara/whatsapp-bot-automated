@@ -99,6 +99,16 @@ module.exports = async (req, res) => {
     }
   } catch (err) {
     console.error('Failed to notify user of KYC decision:', err);
+    res.setHeader('Content-Type', 'text/html');
+    return res.status(500).send(`
+      <html><body style="font-family:sans-serif;padding:40px;max-width:500px;margin:auto">
+        <h2 style="color:#dc2626">⚠️ Notification failed</h2>
+        <p>The account was updated to <strong>${newStatus}</strong>, but the PayLink app notification for
+        <strong>${submission.phone}</strong> could not be sent.</p>
+        <p><strong>Error:</strong> ${err.message}</p>
+        <p>Ensure <code>005_user_notifications.sql</code> has been run in Supabase, then try again or ask the customer to open the app after you re-send from admin.</p>
+      </body></html>
+    `);
   }
 
   res.setHeader('Content-Type', 'text/html');

@@ -14,9 +14,9 @@ const { captureError } = require('../lib/observability');
 const { PwaTwilioGateError, getPwaAccessStatus } = require('../lib/customer-service-window');
 const {
   listNotifications,
-  countUnreadNotifications,
   markNotificationRead,
   markAllNotificationsRead,
+  safeCountUnreadNotifications,
 } = require('../lib/notifications');
 const yc = require('../lib/yellowcard');
 
@@ -113,7 +113,7 @@ async function handleGet(req, res) {
     const user = await getOrCreateUser(phone);
     const session = await getSession(phone);
     const pwaAccess = await getPwaAccessStatus(phone);
-    const unreadCount = await countUnreadNotifications(phone);
+    const unreadCount = await safeCountUnreadNotifications(phone);
     return json(res, 200, {
       user: sanitizeUser(user),
       session: { state: session.state, context: session.context || {} },
@@ -127,7 +127,7 @@ async function handleGet(req, res) {
     const unreadOnly = req.query.unread === '1';
     const [notifications, unreadCount] = await Promise.all([
       listNotifications(phone, { unreadOnly }),
-      countUnreadNotifications(phone),
+      safeCountUnreadNotifications(phone),
     ]);
     return json(res, 200, { notifications, unreadCount });
   }
@@ -217,6 +217,7 @@ async function handleVerify(body, res) {
     ok: true,
     user: sanitizeUser(user),
     session: { state: session.state },
+    unreadCount: await safeCountUnreadNotifications(phone),
   });
 }
 
@@ -229,7 +230,7 @@ async function handleMessage(body, req, res) {
 
   let reply;
   try {
-    reply = await handleIncomingMessage(phone, text, []);
+    reply = await handleIncomingMessage(phone, text, [], { channel: 'pwa' });
   } catch (err) {
     captureError(err, { handler: 'app_message', phone, text });
     reply = 'Sorry, something went wrong. Please type "menu" to start over.';
@@ -242,7 +243,7 @@ async function handleMessage(body, req, res) {
     quickReplies: parseQuickRepliesForSession(reply, session),
     user: sanitizeUser(user),
     session: { state: session.state },
-    unreadCount: await countUnreadNotifications(phone),
+    unreadCount: await safeCountUnreadNotifications(phone),
   });
 }
 
@@ -258,7 +259,7 @@ async function handleMarkNotificationRead(body, req, res) {
 
   return json(res, 200, {
     ok: true,
-    unreadCount: await countUnreadNotifications(phone),
+    unreadCount: await safeCountUnreadNotifications(phone),
   });
 }
 
@@ -295,7 +296,7 @@ async function handleUpload(req, res) {
 
   let reply;
   try {
-    reply = await handleIncomingMessage(phone, '', [ref]);
+    reply = await handleIncomingMessage(phone, '', [ref], { channel: 'pwa' });
   } catch (err) {
     captureError(err, { handler: 'app_upload', phone });
     reply = 'Document received but something went wrong. Please try again or type "done".';
@@ -308,7 +309,7 @@ async function handleUpload(req, res) {
     reply,
     quickReplies: parseQuickRepliesForSession(reply, session),
     session: { state: session.state },
-    unreadCount: await countUnreadNotifications(phone),
+    unreadCount: await safeCountUnreadNotifications(phone),
   });
 }
 

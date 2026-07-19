@@ -24,6 +24,10 @@ const { notifyUser, stripMarkdown, listNotifications } = require('../lib/notific
 describe('notifications', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    supabase._chain.maybeSingle.mockResolvedValue({
+      data: { phone: '+26771234567' },
+      error: null,
+    });
     supabase._chain.single.mockResolvedValue({
       data: { id: 'n1', phone: '+26771234567', type: 'kyc_approved' },
       error: null,

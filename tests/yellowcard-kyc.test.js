@@ -9,10 +9,29 @@ describe('Yellow Card retail KYC helpers', () => {
     expect(yc.formatDobForYc('19/09/2098')).toBeNull();
   });
 
-  it('normalizeIdTypeForYc maps common labels', () => {
-    expect(yc.normalizeIdTypeForYc('National ID')).toBe('national_id');
-    expect(yc.normalizeIdTypeForYc('ID')).toBe('national_id');
+  it('normalizeIdTypeForYc maps common labels to YC-documented values', () => {
+    expect(yc.normalizeIdTypeForYc('National ID')).toBe('license');
+    expect(yc.normalizeIdTypeForYc('ID')).toBe('license');
     expect(yc.normalizeIdTypeForYc('Passport A123')).toBe('passport');
+  });
+
+  it('requiresFullKycForCurrency includes BWP', () => {
+    expect(yc.requiresFullKycForCurrency('BWP')).toBe(true);
+    expect(yc.requiresFullKycForCurrency('KES')).toBe(false);
+  });
+
+  it('validateRetailKycPayload rejects invalid idType values', () => {
+    const issues = yc.validateRetailKycPayload({
+      name: 'Hamza',
+      country: 'BW',
+      phone: '+26774672123',
+      address: 'Gaborone',
+      dob: '09/19/1990',
+      email: 'hamza@hotmail.com',
+      idNumber: '109984',
+      idType: 'national_id',
+    });
+    expect(issues).toContain('ID type');
   });
 
   it('buildRetailKycFromUser strict mode requires valid dob', () => {
@@ -41,7 +60,8 @@ describe('Yellow Card retail KYC helpers', () => {
     };
     const kyc = yc.buildRetailKycFromUser(user, '+26774672123', 'BW', { strict: true });
     expect(kyc.dob).toBe('09/19/1990');
-    expect(kyc.idType).toBe('national_id');
+    expect(kyc.idType).toBe('license');
     expect(kyc.phone).toBe('+26774672123');
+    expect(yc.validateRetailKycPayload(kyc)).toEqual([]);
   });
 });

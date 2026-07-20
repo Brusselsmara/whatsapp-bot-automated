@@ -5,6 +5,7 @@ const chatView = document.getElementById('chatView');
 const loginForm = document.getElementById('loginForm');
 const verifyForm = document.getElementById('verifyForm');
 const chatForm = document.getElementById('chatForm');
+const messagesInner = document.getElementById('messagesInner');
 const messagesEl = document.getElementById('messages');
 const quickRepliesEl = document.getElementById('quickReplies');
 const loginError = document.getElementById('loginError');
@@ -17,19 +18,28 @@ const notificationsEmpty = document.getElementById('notificationsEmpty');
 const notifBadge = document.getElementById('notifBadge');
 const markAllReadBtn = document.getElementById('markAllReadBtn');
 const statusBar = document.getElementById('statusBar');
+const walletStrip = document.getElementById('walletStrip');
 const fileInput = document.getElementById('fileInput');
 const messageInput = document.getElementById('message');
+const sendBtn = chatForm?.querySelector('.send-btn');
 
 let otpToken = null;
 let pendingPhone = null;
 let chatSessionState = null;
 let notifPollTimer = null;
+let sending = false;
 
 function escapeHtml(text) {
   return String(text || '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+function formatMoney(amount, currency) {
+  const n = Number(amount);
+  if (!Number.isFinite(n)) return '0.00';
+  return `${n.toFixed(2)} ${currency || ''}`.trim();
 }
 
 function updateNotifBadge(count) {
@@ -48,6 +58,20 @@ function formatNotifTime(iso) {
   } catch {
     return '';
   }
+}
+
+function updateWalletStrip(data) {
+  const wallet = data?.wallet;
+  if (!wallet?.currency) {
+    walletStrip.classList.add('hidden');
+    walletStrip.innerHTML = '';
+    return;
+  }
+  walletStrip.classList.remove('hidden');
+  walletStrip.innerHTML =
+    '<span class="wallet-icon" aria-hidden="true">💰</span>' +
+    `<span class="wallet-pill"><strong>${escapeHtml(wallet.currency)}</strong>` +
+    `<span>${formatMoney(wallet.balance, wallet.currency)}</span></span>`;
 }
 
 function renderNotificationsList(items) {
@@ -103,6 +127,12 @@ function setChatSessionState(session) {
   chatSessionState = session?.state || null;
 }
 
+function resizeComposer() {
+  if (!messageInput) return;
+  messageInput.style.height = 'auto';
+  messageInput.style.height = `${Math.min(messageInput.scrollHeight, 120)}px`;
+}
+
 function focusComposer() {
   if (!messageInput) return;
   try {
@@ -124,16 +154,13 @@ function scrollMessagesToEnd() {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       messagesEl.scrollTop = messagesEl.scrollHeight;
-      const last = messagesEl.lastElementChild;
-      if (last?.scrollIntoView) {
-        last.scrollIntoView({ block: 'end', behavior: 'auto' });
-      }
     });
   });
 }
 
 function afterChatUpdate({ focusInput = true } = {}) {
   scrollMessagesToEnd();
+  resizeComposer();
   const docUpload = chatSessionState === 'register_documents';
   if (focusInput && !docUpload) {
     focusComposer();
@@ -172,18 +199,50 @@ function showGateError(err) {
   }
 }
 
-function formatBotText(text) {
-  return String(text || '')
-    .replace(/\*([^*]+)\*/g, '$1')
-    .replace(/_([^_]+)_/g, '$1');
+function formatBotHtml(text) {
+  const escaped = escapeHtml(text);
+  return escaped
+    .replace(/\*([^*]+)\*/g, '<strong>$1</strong>')
+    .replace(/_([^_]+)_/g, '<em>$1</em>');
+}
+
+function showTypingIndicator() {
+  hideTypingIndicator();
+  const row = document.createElement('div');
+  row.className = 'bubble-row bot';
+  row.id = 'typingIndicator';
+  row.innerHTML =
+    '<div class="typing-indicator" aria-label="PayLink is typing">' +
+    '<span></span><span></span><span></span></div>';
+  messagesInner.appendChild(row);
+  scrollMessagesToEnd();
+}
+
+function hideTypingIndicator() {
+  document.getElementById('typingIndicator')?.remove();
 }
 
 function addBubble(text, role, { scroll = role === 'bot' } = {}) {
+  const row = document.createElement('div');
+  row.className = `bubble-row ${role}`;
   const div = document.createElement('div');
   div.className = `bubble ${role}`;
-  div.textContent = formatBotText(text);
-  messagesEl.appendChild(div);
+  if (role === 'bot') {
+    div.innerHTML = formatBotHtml(text);
+  } else {
+    div.textContent = text;
+  }
+  row.appendChild(div);
+  messagesInner.appendChild(row);
   if (scroll) scrollMessagesToEnd();
+}
+
+function setSending(busy) {
+  sending = busy;
+  if (sendBtn) sendBtn.disabled = busy;
+  if (messageInput) messageInput.disabled = busy;
+  if (busy) showTypingIndicator();
+  else hideTypingIndicator();
 }
 
 function renderQuickReplies(replies, session) {
@@ -244,10 +303,12 @@ function showLogin() {
   document.documentElement.classList.remove('chat-active');
   document.body.classList.remove('chat-active');
   stopNotificationPolling();
-  messagesEl.innerHTML = '';
+  messagesInner.innerHTML = '';
   quickRepliesEl.innerHTML = '';
   chatSessionState = null;
   updateNotifBadge(0);
+  walletStrip.classList.add('hidden');
+  walletStrip.innerHTML = '';
 }
 
 async function bootstrap() {
@@ -265,6 +326,7 @@ async function bootstrap() {
 
 function updateStatus(data) {
   setChatSessionState(data?.session);
+  updateWalletStrip(data);
   if (data?.user?.kycStatus === 'pending_review') {
     statusBar.textContent =
       'Your registration is under review — we will notify you in the PayLink app, usually within 1 business day.';
@@ -340,10 +402,12 @@ verifyForm.addEventListener('submit', async (e) => {
 
 async function sendMessage(text) {
   const trimmed = String(text || '').trim();
-  if (!trimmed) return;
+  if (!trimmed || sending) return;
   addBubble(trimmed, 'user', { scroll: true });
   messageInput.value = '';
+  resizeComposer();
   quickRepliesEl.innerHTML = '';
+  setSending(true);
 
   try {
     const data = await api('', {
@@ -358,6 +422,7 @@ async function sendMessage(text) {
   } catch (err) {
     addBubble(userFacingClientError(err.message), 'bot', { scroll: true });
   } finally {
+    setSending(false);
     afterChatUpdate({ focusInput: chatSessionState !== 'register_documents' });
   }
 }
@@ -367,14 +432,24 @@ chatForm.addEventListener('submit', async (e) => {
   await sendMessage(messageInput.value);
 });
 
+messageInput.addEventListener('input', resizeComposer);
+
+messageInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    chatForm.requestSubmit();
+  }
+});
+
 fileInput.addEventListener('change', async () => {
   const file = fileInput.files?.[0];
   fileInput.value = '';
-  if (!file) return;
+  if (!file || sending) return;
 
   addBubble(`📎 Uploaded ${file.name}`, 'user', { scroll: true });
   quickRepliesEl.innerHTML = '';
   messageInput.blur();
+  setSending(true);
   const form = new FormData();
   form.append('file', file);
 
@@ -388,6 +463,7 @@ fileInput.addEventListener('change', async () => {
   } catch (err) {
     addBubble(userFacingClientError(err.message) || 'Upload failed.', 'bot', { scroll: true });
   } finally {
+    setSending(false);
     afterChatUpdate({ focusInput: false });
   }
 });

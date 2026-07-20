@@ -20,6 +20,20 @@ const {
   safeCountUnreadNotifications,
 } = require('../lib/notifications');
 const yc = require('../lib/yellowcard');
+const { supabase } = require('../lib/db');
+
+async function loadUserWallet(phone, user) {
+  const currency = user?.home_currency || user?.homeCurrency;
+  if (!currency) return null;
+  const { data } = await supabase
+    .from('wallets')
+    .select('balance, currency')
+    .eq('phone', phone)
+    .eq('currency', currency)
+    .maybeSingle();
+  const balance = data ? parseFloat(data.balance) : 0;
+  return { currency, balance };
+}
 
 module.exports.config = { api: { bodyParser: false } };
 
@@ -116,12 +130,14 @@ async function handleGet(req, res) {
     const session = await getSession(phone);
     const pwaAccess = await getPwaAccessStatus(phone);
     const unreadCount = await safeCountUnreadNotifications(phone);
+    const wallet = await loadUserWallet(phone, user);
     return json(res, 200, {
       user: sanitizeUser(user),
       session: { state: session.state, context: session.context || {} },
       supported: yc.isSupportedWhatsAppNumber(phone),
       pwaAccess,
       unreadCount,
+      wallet,
     });
   }
 
@@ -216,11 +232,13 @@ async function handleVerify(body, res) {
   res.setHeader('Set-Cookie', createAppSessionCookie(phone));
   const user = await getOrCreateUser(phone);
   const session = await getSession(phone);
+  const wallet = await loadUserWallet(phone, user);
   return json(res, 200, {
     ok: true,
     user: sanitizeUser(user),
     session: { state: session.state },
     unreadCount: await safeCountUnreadNotifications(phone),
+    wallet,
   });
 }
 
@@ -241,12 +259,14 @@ async function handleMessage(body, req, res) {
 
   const user = await getOrCreateUser(phone);
   const session = await getSession(phone);
+  const wallet = await loadUserWallet(phone, user);
   return json(res, 200, {
     reply,
     quickReplies: parseQuickRepliesForSession(reply, session),
     user: sanitizeUser(user),
     session: { state: session.state },
     unreadCount: await safeCountUnreadNotifications(phone),
+    wallet,
   });
 }
 
@@ -306,6 +326,8 @@ async function handleUpload(req, res) {
   }
 
   const session = await getSession(phone);
+  const user = await getOrCreateUser(phone);
+  const wallet = await loadUserWallet(phone, user);
   return json(res, 200, {
     ok: true,
     ref,
@@ -313,6 +335,7 @@ async function handleUpload(req, res) {
     quickReplies: parseQuickRepliesForSession(reply, session),
     session: { state: session.state },
     unreadCount: await safeCountUnreadNotifications(phone),
+    wallet,
   });
 }
 

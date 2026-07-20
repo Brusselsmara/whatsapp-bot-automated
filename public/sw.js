@@ -1,4 +1,4 @@
-const CACHE = 'paylink-v3';
+const CACHE = 'paylink-v4';
 const ASSETS = ['/', '/index.html', '/styles.css', '/app.js', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {

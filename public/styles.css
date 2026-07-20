@@ -218,6 +218,15 @@ button, .attach-btn {
   font-size: 0.88rem;
 }
 
+.pay-invoice-banner {
+  border-color: oklch(0.75 0.08 155);
+  background: oklch(0.97 0.04 155);
+}
+
+.pay-invoice-banner strong {
+  font-weight: 700;
+}
+
 /* ─── Chat shell ─────────────────────────────────────────────────────── */
 
 .chat-screen {

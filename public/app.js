@@ -10,6 +10,7 @@ const messagesEl = document.getElementById('messages');
 const quickRepliesEl = document.getElementById('quickReplies');
 const loginError = document.getElementById('loginError');
 const activationNotice = document.getElementById('activationNotice');
+const payInvoiceBanner = document.getElementById('payInvoiceBanner');
 const logoutBtn = document.getElementById('logoutBtn');
 const notificationsBtn = document.getElementById('notificationsBtn');
 const notificationsPanel = document.getElementById('notificationsPanel');
@@ -25,6 +26,8 @@ const sendBtn = chatForm?.querySelector('.send-btn');
 
 let otpToken = null;
 let pendingPhone = null;
+let pendingPayCode = null;
+const PAY_CODE_STORAGE_KEY = 'paylink_pending_invoice';
 let chatSessionState = null;
 let notifPollTimer = null;
 let settlementTimer = null;
@@ -284,6 +287,113 @@ function showActivationNotice(message) {
   activationNotice.classList.remove('hidden');
 }
 
+function hidePayInvoiceBanner() {
+  if (!payInvoiceBanner) return;
+  payInvoiceBanner.textContent = '';
+  payInvoiceBanner.classList.add('hidden');
+}
+
+function showPayInvoiceBanner(message) {
+  if (!payInvoiceBanner) return;
+  payInvoiceBanner.textContent = message;
+  payInvoiceBanner.classList.remove('hidden');
+}
+
+function parsePayCodeFromUrl() {
+  const pathMatch = window.location.pathname.match(/^\/pay\/([^/]+)/i);
+  if (pathMatch) return decodeURIComponent(pathMatch[1]).trim().toUpperCase();
+  const params = new URLSearchParams(window.location.search);
+  const queryCode = params.get('invoice') || params.get('pay');
+  return queryCode ? queryCode.trim().toUpperCase() : null;
+}
+
+async function initPayLinkFromUrl() {
+  const code = parsePayCodeFromUrl();
+  if (!code) return;
+
+  pendingPayCode = code;
+  sessionStorage.setItem(PAY_CODE_STORAGE_KEY, code);
+
+  try {
+    const res = await fetch(`/api/invoice?code=${encodeURIComponent(code)}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      showPayInvoiceBanner(data.error || 'Invoice not found.');
+      return;
+    }
+    const inv = data.invoice;
+    if (!inv?.payable) {
+      showPayInvoiceBanner(`Invoice ${inv.code} is already ${inv.status}.`);
+      return;
+    }
+    const desc = inv.description ? ` — ${inv.description}` : '';
+    showPayInvoiceBanner(
+      `Invoice from ${inv.merchantName}: ${inv.amount} ${inv.currency}${desc}. Sign in to pay.`
+    );
+  } catch {
+    showPayInvoiceBanner(`Sign in to pay invoice ${code}.`);
+  }
+}
+
+function applyChatResponse(data) {
+  setChatSessionState(data.session);
+  if (data.reply) addBubble(data.reply, 'bot', { scroll: true });
+  renderQuickReplies(data.quickReplies, data.session);
+  updateStatus(data);
+  if (typeof data.unreadCount === 'number') updateNotifBadge(data.unreadCount);
+}
+
+async function startPendingInvoicePay() {
+  const code = pendingPayCode || sessionStorage.getItem(PAY_CODE_STORAGE_KEY);
+  if (!code) return false;
+
+  pendingPayCode = null;
+  sessionStorage.removeItem(PAY_CODE_STORAGE_KEY);
+
+  try {
+    const data = await api('', {
+      method: 'POST',
+      body: { action: 'start-invoice-pay', code },
+    });
+    applyChatResponse(data);
+    await syncAppState({ announceNotifications: true });
+    return true;
+  } catch (err) {
+    addBubble(userFacingClientError(err.message), 'bot', { scroll: true });
+    return true;
+  }
+}
+
+/**
+ * Compress image uploads before KYC upload (target ≤500KB).
+ */
+async function compressImageFile(file, { maxBytes = 500 * 1024, maxDim = 1600 } = {}) {
+  if (!file?.type?.startsWith('image/')) return file;
+
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close?.();
+
+  let quality = 0.85;
+  let blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+  while (blob && blob.size > maxBytes && quality > 0.45) {
+    quality -= 0.1;
+    blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+  }
+  if (!blob) return file;
+
+  const base = file.name.replace(/\.[^.]+$/, '') || 'document';
+  return new File([blob], `${base}.jpg`, { type: 'image/jpeg', lastModified: Date.now() });
+}
+
 function showGateError(err) {
   showError(err.message);
   if (err.data?.code === 'PWA_NOT_ACTIVATED') {
@@ -424,11 +534,16 @@ function showLogin() {
 }
 
 async function bootstrap() {
+  await initPayLinkFromUrl();
   try {
     const data = await api('?action=me');
     showChat();
     updateStatus(data);
-    addBubble('Welcome back to PayLink. Type "menu" to see options.', 'bot');
+    hidePayInvoiceBanner();
+    const startedInvoice = await startPendingInvoicePay();
+    if (!startedInvoice) {
+      addBubble('Welcome back to PayLink. Type "menu" to see options.', 'bot');
+    }
     focusComposer();
   } catch (err) {
     if (err.status !== 401) showError(err.message);
@@ -506,7 +621,11 @@ verifyForm.addEventListener('submit', async (e) => {
     });
     showChat();
     updateStatus(data);
-    addBubble('Welcome to PayLink 👋\n\nType "menu" or tap a quick reply to get started.', 'bot');
+    hidePayInvoiceBanner();
+    const startedInvoice = await startPendingInvoicePay();
+    if (!startedInvoice) {
+      addBubble('Welcome to PayLink 👋\n\nType "menu" or tap a quick reply to get started.', 'bot');
+    }
     focusComposer();
   } catch (err) {
     showError(err.message);
@@ -556,9 +675,20 @@ messageInput.addEventListener('keydown', (e) => {
 });
 
 fileInput.addEventListener('change', async () => {
-  const file = fileInput.files?.[0];
+  let file = fileInput.files?.[0];
   fileInput.value = '';
   if (!file || sending) return;
+
+  setSending(true);
+  try {
+    if (file.type.startsWith('image/')) {
+      file = await compressImageFile(file);
+    }
+  } catch {
+    addBubble('Could not process that image. Try a smaller photo or PDF.', 'bot', { scroll: true });
+    setSending(false);
+    return;
+  }
 
   addBubble(`📎 Uploaded ${file.name}`, 'user', { scroll: true });
   quickRepliesEl.innerHTML = '';

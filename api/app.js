@@ -1,4 +1,4 @@
-const { handleIncomingMessage, getSession, getOrCreateUser, settlePending, getSettlementPendingCount } = require('../lib/conversation');
+const { handleIncomingMessage, getSession, getOrCreateUser, settlePending, getSettlementPendingCount, beginInvoicePayment } = require('../lib/conversation');
 const {
   isAppAuthConfigured,
   issueOtp,
@@ -38,7 +38,7 @@ async function loadUserWallet(phone, user) {
 
 module.exports.config = { api: { bodyParser: false } };
 
-const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
 
 function readRawBody(req, limit = 512 * 1024) {
   return new Promise((resolve, reject) => {
@@ -194,6 +194,8 @@ async function handlePost(req, res) {
       return handleMarkAllNotificationsRead(req, res);
     case 'ack-messages':
       return handleAckMessages(body, req, res);
+    case 'start-invoice-pay':
+      return handleStartInvoicePay(body, req, res);
     default:
       return json(res, 400, { error: 'Unknown action' });
   }
@@ -316,6 +318,41 @@ async function handleAckMessages(body, req, res) {
 
   const acked = await ackAppMessages(phone, ids);
   return json(res, 200, { ok: true, acked });
+}
+
+async function handleStartInvoicePay(body, req, res) {
+  const phone = getPhoneFromSession(req);
+  if (!phone) return json(res, 401, { error: 'Not logged in' });
+
+  const code = String(body.code || '').trim();
+  if (!code) return json(res, 400, { error: 'Invoice code is required.' });
+
+  const user = await getOrCreateUser(phone);
+  if (user.kyc_status !== 'approved') {
+    return json(res, 403, { error: 'Your account must be approved before paying invoices.' });
+  }
+
+  let reply;
+  try {
+    reply = await beginInvoicePayment(phone, code);
+  } catch (err) {
+    captureError(err, { handler: 'start_invoice_pay', phone, code });
+    reply = 'Sorry, something went wrong loading this invoice. Please try again.';
+  }
+
+  const session = await getSession(phone);
+  const wallet = await loadUserWallet(phone, user);
+  const pendingCount = await getSettlementPendingCount(phone);
+
+  return json(res, 200, {
+    reply,
+    quickReplies: parseQuickRepliesForSession(reply, session),
+    user: sanitizeUser(user),
+    session: { state: session.state, context: session.context || {} },
+    unreadCount: await safeCountUnreadNotifications(phone),
+    pendingCount,
+    wallet,
+  });
 }
 
 async function handleUpload(req, res) {

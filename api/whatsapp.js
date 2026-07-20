@@ -10,10 +10,19 @@ const { recordWhatsAppInbound } = require('../lib/customer-service-window');
 
 module.exports.config = { api: { bodyParser: false } };
 
-function readRawBody(req) {
+function readRawBody(req, maxBytes = 2 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     let data = '';
-    req.on('data', (chunk) => (data += chunk));
+    let bytes = 0;
+    req.on('data', (chunk) => {
+      bytes += chunk.length;
+      if (bytes > maxBytes) {
+        req.destroy();
+        reject(new Error('Payload too large'));
+      } else {
+        data += chunk;
+      }
+    });
     req.on('end', () => resolve(data));
     req.on('error', reject);
   });

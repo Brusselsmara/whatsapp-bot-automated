@@ -35,6 +35,8 @@ let notifsSeeded = false;
 const SETTLEMENT_POLL_MS = 5000;
 const SETTLEMENT_POLL_MAX_MS = 15 * 60 * 1000;
 let settlementPollStartedAt = 0;
+let settlementPollDelayMs = 5000;
+const SETTLEMENT_POLL_MAX_DELAY = 60000;
 
 function escapeHtml(text) {
   return String(text || '')
@@ -155,9 +157,10 @@ async function syncAppState({ announceNotifications = false } = {}) {
 }
 
 function stopSettlementPolling() {
-  if (settlementTimer) clearInterval(settlementTimer);
+  if (settlementTimer) clearTimeout(settlementTimer);
   settlementTimer = null;
   settlementPollStartedAt = 0;
+  settlementPollDelayMs = 5000;
 }
 
 function maybeStartSettlementPolling(pendingCount) {
@@ -167,18 +170,28 @@ function maybeStartSettlementPolling(pendingCount) {
   }
   if (settlementTimer) return;
   settlementPollStartedAt = Date.now();
-  settlementTimer = setInterval(async () => {
+  settlementPollDelayMs = 5000;
+  scheduleNextPoll();
+}
+
+function scheduleNextPoll() {
+  settlementTimer = setTimeout(async () => {
     if (Date.now() - settlementPollStartedAt > SETTLEMENT_POLL_MAX_MS) {
       stopSettlementPolling();
       return;
     }
     try {
       const data = await syncAppState({ announceNotifications: true });
-      if (!data.pendingCount) stopSettlementPolling();
+      if (!data.pendingCount) {
+        stopSettlementPolling();
+        return;
+      }
     } catch {
-      stopSettlementPolling();
+      // Ignore errors (offline)
     }
-  }, SETTLEMENT_POLL_MS);
+    settlementPollDelayMs = Math.min(settlementPollDelayMs * 1.5, SETTLEMENT_POLL_MAX_DELAY);
+    scheduleNextPoll();
+  }, settlementPollDelayMs);
 }
 
 async function refreshNotifications() {

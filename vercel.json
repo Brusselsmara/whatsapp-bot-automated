@@ -1,4 +1,14 @@
 {
+  "headers": [
+    {
+      "source": "/sw.js",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
+    },
+    {
+      "source": "/(index.html|styles.css|app.js|manifest.webmanifest)",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }]
+    }
+  ],
   "functions": {
     "api/whatsapp.js":              { "maxDuration": 30 },
     "api/app.js":                     { "maxDuration": 30 },

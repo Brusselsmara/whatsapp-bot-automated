@@ -1,4 +1,4 @@
-const { handleIncomingMessage, getSession, getOrCreateUser, settlePending } = require('../lib/conversation');
+const { handleIncomingMessage, getSession, getOrCreateUser, settlePending, getSettlementPendingCount } = require('../lib/conversation');
 const {
   isAppAuthConfigured,
   issueOtp,
@@ -19,6 +19,7 @@ const {
   markAllNotificationsRead,
   safeCountUnreadNotifications,
 } = require('../lib/notifications');
+const { listUndeliveredAppMessages, ackAppMessages } = require('../lib/app-messages');
 const yc = require('../lib/yellowcard');
 const { supabase } = require('../lib/db');
 
@@ -129,7 +130,10 @@ async function handleGet(req, res) {
     const user = await getOrCreateUser(phone);
     const session = await getSession(phone);
     const pwaAccess = await getPwaAccessStatus(phone);
-    const unreadCount = await safeCountUnreadNotifications(phone);
+    const [unreadCount, pendingCount] = await Promise.all([
+      safeCountUnreadNotifications(phone),
+      getSettlementPendingCount(phone),
+    ]);
     const wallet = await loadUserWallet(phone, user);
     return json(res, 200, {
       user: sanitizeUser(user),
@@ -137,18 +141,23 @@ async function handleGet(req, res) {
       supported: yc.isSupportedWhatsAppNumber(phone),
       pwaAccess,
       unreadCount,
+      pendingCount,
       wallet,
     });
   }
 
-  if (action === 'notifications') {
+  if (action === 'sync' || action === 'notifications') {
     await settlePending(phone);
-    const unreadOnly = req.query.unread === '1';
-    const [notifications, unreadCount] = await Promise.all([
+    const user = await getOrCreateUser(phone);
+    const unreadOnly = action === 'notifications' && req.query.unread === '1';
+    const [notifications, unreadCount, pendingCount, wallet, messages] = await Promise.all([
       listNotifications(phone, { unreadOnly }),
       safeCountUnreadNotifications(phone),
+      getSettlementPendingCount(phone),
+      loadUserWallet(phone, user),
+      action === 'sync' ? listUndeliveredAppMessages(phone) : Promise.resolve([]),
     ]);
-    return json(res, 200, { notifications, unreadCount });
+    return json(res, 200, { notifications, unreadCount, pendingCount, wallet, messages });
   }
 
   return json(res, 400, { error: 'Unknown action' });
@@ -183,6 +192,8 @@ async function handlePost(req, res) {
       return handleMarkNotificationRead(body, req, res);
     case 'mark-all-notifications-read':
       return handleMarkAllNotificationsRead(req, res);
+    case 'ack-messages':
+      return handleAckMessages(body, req, res);
     default:
       return json(res, 400, { error: 'Unknown action' });
   }
@@ -260,12 +271,14 @@ async function handleMessage(body, req, res) {
   const user = await getOrCreateUser(phone);
   const session = await getSession(phone);
   const wallet = await loadUserWallet(phone, user);
+  const pendingCount = await getSettlementPendingCount(phone);
   return json(res, 200, {
     reply,
     quickReplies: parseQuickRepliesForSession(reply, session),
     user: sanitizeUser(user),
     session: { state: session.state },
     unreadCount: await safeCountUnreadNotifications(phone),
+    pendingCount,
     wallet,
   });
 }
@@ -292,6 +305,17 @@ async function handleMarkAllNotificationsRead(req, res) {
 
   await markAllNotificationsRead(phone);
   return json(res, 200, { ok: true, unreadCount: 0 });
+}
+
+async function handleAckMessages(body, req, res) {
+  const phone = getPhoneFromSession(req);
+  if (!phone) return json(res, 401, { error: 'Not logged in' });
+
+  const ids = Array.isArray(body.ids) ? body.ids.filter(Boolean) : [];
+  if (!ids.length) return json(res, 400, { error: 'Message ids are required.' });
+
+  const acked = await ackAppMessages(phone, ids);
+  return json(res, 200, { ok: true, acked });
 }
 
 async function handleUpload(req, res) {
@@ -328,6 +352,7 @@ async function handleUpload(req, res) {
   const session = await getSession(phone);
   const user = await getOrCreateUser(phone);
   const wallet = await loadUserWallet(phone, user);
+  const pendingCount = await getSettlementPendingCount(phone);
   return json(res, 200, {
     ok: true,
     ref,
@@ -335,6 +360,7 @@ async function handleUpload(req, res) {
     quickReplies: parseQuickRepliesForSession(reply, session),
     session: { state: session.state },
     unreadCount: await safeCountUnreadNotifications(phone),
+    pendingCount,
     wallet,
   });
 }

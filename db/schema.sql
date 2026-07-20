@@ -98,6 +98,23 @@ create index if not exists user_notifications_unread_idx
   on user_notifications (phone) where read_at is null;
 
 -- ============================================================
+-- APP MESSAGES — proactive PayLink PWA chat (receipts, declines)
+-- ============================================================
+create table if not exists app_messages (
+  id uuid primary key default uuid_generate_v4(),
+  phone text not null references users(phone),
+  text text not null,
+  action_url text,
+  action_label text,
+  delivered_at timestamptz,
+  created_at timestamptz default now()
+);
+
+create index if not exists app_messages_undelivered_idx
+  on app_messages (phone, created_at desc)
+  where delivered_at is null;
+
+-- ============================================================
 -- SESSIONS — conversation state machine, one row per phone number
 -- ============================================================
 create table if not exists sessions (

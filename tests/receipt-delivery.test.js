@@ -15,8 +15,8 @@ jest.mock('../lib/db', () => {
   };
 });
 
-jest.mock('../lib/notifications', () => ({
-  notifyUser: jest.fn().mockResolvedValue({ id: 'n1' }),
+jest.mock('../lib/app-messages', () => ({
+  enqueueAppMessage: jest.fn().mockResolvedValue({ id: 'm1' }),
 }));
 
 jest.mock('../lib/settlement', () => ({
@@ -24,7 +24,7 @@ jest.mock('../lib/settlement', () => ({
 }));
 
 const { supabase } = require('../lib/db');
-const { notifyUser } = require('../lib/notifications');
+const { enqueueAppMessage } = require('../lib/app-messages');
 const { claimReceiptSent } = require('../lib/settlement');
 const { deliverSendReceipt } = require('../lib/receipt-delivery');
 
@@ -48,16 +48,16 @@ describe('receipt delivery', () => {
     supabase._chain.update.mockReturnValue({ eq: jest.fn().mockResolvedValue({ error: null }) });
   });
 
-  it('delivers a PWA notification with a relative receipt URL when PUBLIC_APP_URL is unset', async () => {
+  it('delivers a PWA chat message with a relative receipt URL when PUBLIC_APP_URL is unset', async () => {
     const result = await deliverSendReceipt({ id: 'txn-1' });
 
     expect(result).toEqual({ sent: true });
     expect(claimReceiptSent).toHaveBeenCalledWith('txn-1');
-    expect(notifyUser).toHaveBeenCalledWith(
+    expect(enqueueAppMessage).toHaveBeenCalledWith(
       '+26771234567',
       expect.objectContaining({
-        type: 'receipt',
         actionUrl: expect.stringMatching(/^\/api\/receipt\?id=txn-1/),
+        actionLabel: 'Download PDF receipt',
       })
     );
   });
@@ -70,6 +70,6 @@ describe('receipt delivery', () => {
 
     const result = await deliverSendReceipt({ id: 'txn-1' });
     expect(result).toEqual({ sent: false, reason: 'not_eligible' });
-    expect(notifyUser).not.toHaveBeenCalled();
+    expect(enqueueAppMessage).not.toHaveBeenCalled();
   });
 });

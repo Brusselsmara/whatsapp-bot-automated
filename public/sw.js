@@ -1,4 +1,4 @@
-const CACHE = 'paylink-v5';
+const CACHE = 'paylink-v7';
 const SHELL = ['/index.html', '/styles.css', '/app.js', '/manifest.webmanifest'];
 
 /** App shell — always try network first so UI updates reach installed PWAs. */

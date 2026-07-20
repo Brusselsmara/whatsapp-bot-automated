@@ -1,5 +1,6 @@
 const { supabase } = require('../lib/db');
 const { notifyUser, stripMarkdown } = require('../lib/notifications');
+const { enqueueAppMessage, formatSendFailedAppMessage } = require('../lib/app-messages');
 const yc = require('../lib/yellowcard');
 const {
   claimTopupCredit,
@@ -17,7 +18,7 @@ const { captureError } = require('../lib/observability');
  * Cron safety net for ALL users — no inbound WhatsApp message required:
  * - Pending top-ups → credit wallet + notify
  * - Pending sends / invoice payments → mark complete or refund
- * - Completed sends with receipt_sent=false → deliver PDF receipt via PWA notification
+ * - Completed sends with receipt_sent=false → deliver PDF receipt via PWA chat message
  *
  * Protected by CRON_SECRET env var. Schedule every 2–5 min via cron-job.org.
  */
@@ -204,12 +205,13 @@ async function failSend(txn, ycData) {
 
   console.log(`[POLL] ↩️ Refunded ${result.amount} ${result.currency} — balance ${result.newBalance}`);
   const { data: fresh } = await supabase.from('transactions').select('recipient_name').eq('id', txn.id).single();
-  await notifyUser(result.phone, {
-    type: 'send_failed',
-    title: 'Transfer failed',
-    body:
-      `Your transfer of ${result.amount} ${result.currency} to ${fresh?.recipient_name || txn.recipient_name} failed. ` +
-      `Your balance has been refunded. Open the PayLink app to try again.`,
+  const ycStatus = (ycData?.status || 'FAILED').toUpperCase();
+  const failMsg = formatSendFailedAppMessage({
+    amount: result.amount,
+    currency: result.currency,
+    recipientName: fresh?.recipient_name || txn.recipient_name,
+    ycStatus,
   });
+  await enqueueAppMessage(result.phone, failMsg);
   return 'send_failed_refunded';
 }

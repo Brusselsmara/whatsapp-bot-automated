@@ -500,6 +500,17 @@ button, .attach-btn {
 
 .bubble.bot strong { font-weight: 700; }
 
+.bubble-link {
+  display: inline-block;
+  margin-top: 0.5rem;
+  color: var(--green);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.bubble-link:hover { opacity: 0.85; }
+
 .bubble.user {
   background: var(--green-user-bubble);
   color: #fff;

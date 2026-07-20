@@ -1,5 +1,6 @@
 const { supabase } = require('../lib/db');
 const { notifyUser, stripMarkdown } = require('../lib/notifications');
+const { enqueueAppMessage, formatSendFailedAppMessage } = require('../lib/app-messages');
 const { getWebhookSignature, verifyWebhookSignature } = require('../lib/yellowcard');
 const {
   claimTopupCredit,
@@ -149,13 +150,14 @@ async function handleSendUpdate(txn, status, event) {
     }
     console.log(`[WEBHOOK] ↩️ Refunded ${result.amount} ${result.currency} — balance ${result.newBalance}`);
     const { data: fresh } = await supabase.from('transactions').select('recipient_name').eq('id', txn.id).single();
-    await notifyUser(result.phone, {
-      type: 'send_failed',
-      title: 'Transfer failed',
-      body:
-        `Your transfer of ${result.amount} ${result.currency} to ${fresh?.recipient_name || txn.recipient_name} failed. ` +
-        `Your balance has been refunded. Open the PayLink app to try again.`,
+    const ycStatus = (event?.status || 'FAILED').toUpperCase();
+    const failMsg = formatSendFailedAppMessage({
+      amount: result.amount,
+      currency: result.currency,
+      recipientName: fresh?.recipient_name || txn.recipient_name,
+      ycStatus,
     });
+    await enqueueAppMessage(result.phone, failMsg);
   } else {
     await supabase.from('transactions')
       .update({ status, updated_at: new Date().toISOString(), raw_response: event })

@@ -27,7 +27,14 @@ let otpToken = null;
 let pendingPhone = null;
 let chatSessionState = null;
 let notifPollTimer = null;
+let settlementTimer = null;
 let sending = false;
+let seenNotifIds = new Set();
+let seenMessageIds = new Set();
+let notifsSeeded = false;
+const SETTLEMENT_POLL_MS = 5000;
+const SETTLEMENT_POLL_MAX_MS = 15 * 60 * 1000;
+let settlementPollStartedAt = 0;
 
 function escapeHtml(text) {
   return String(text || '')
@@ -94,11 +101,89 @@ function renderNotificationsList(items) {
   });
 }
 
+function addNotificationBubble(item) {
+  const text = `🔔 *${item.title}*\n${item.body}`;
+  addBubble(text, 'bot', { scroll: true });
+}
+
+function trackNewNotifications(items, { announce = false } = {}) {
+  const list = items || [];
+  if (!notifsSeeded) {
+    list.forEach((n) => seenNotifIds.add(n.id));
+    notifsSeeded = true;
+    return;
+  }
+  if (!announce) return;
+  const actionable = new Set(['topup_failed', 'topup_complete']);
+  for (const item of list) {
+    if (seenNotifIds.has(item.id)) continue;
+    seenNotifIds.add(item.id);
+    if (actionable.has(item.type)) addNotificationBubble(item);
+  }
+}
+
+function displayAppMessages(messages, { scroll = true } = {}) {
+  const toAck = [];
+  for (const msg of messages || []) {
+    if (seenMessageIds.has(msg.id)) continue;
+    seenMessageIds.add(msg.id);
+    addBubble(msg.text, 'bot', {
+      scroll,
+      actionUrl: msg.action_url,
+      actionLabel: msg.action_label,
+    });
+    toAck.push(msg.id);
+  }
+  return toAck;
+}
+
+async function ackAppMessages(ids) {
+  if (!ids.length) return;
+  await api('', { method: 'POST', body: { action: 'ack-messages', ids } }).catch(() => {});
+}
+
+async function syncAppState({ announceNotifications = false } = {}) {
+  const data = await api('?action=sync');
+  updateStatus(data);
+  updateNotifBadge(data.unreadCount);
+  renderNotificationsList(data.notifications || []);
+  trackNewNotifications(data.notifications, { announce: announceNotifications });
+  const ackIds = displayAppMessages(data.messages, { scroll: true });
+  await ackAppMessages(ackIds);
+  maybeStartSettlementPolling(data.pendingCount);
+  return data;
+}
+
+function stopSettlementPolling() {
+  if (settlementTimer) clearInterval(settlementTimer);
+  settlementTimer = null;
+  settlementPollStartedAt = 0;
+}
+
+function maybeStartSettlementPolling(pendingCount) {
+  if (!pendingCount) {
+    stopSettlementPolling();
+    return;
+  }
+  if (settlementTimer) return;
+  settlementPollStartedAt = Date.now();
+  settlementTimer = setInterval(async () => {
+    if (Date.now() - settlementPollStartedAt > SETTLEMENT_POLL_MAX_MS) {
+      stopSettlementPolling();
+      return;
+    }
+    try {
+      const data = await syncAppState({ announceNotifications: true });
+      if (!data.pendingCount) stopSettlementPolling();
+    } catch {
+      stopSettlementPolling();
+    }
+  }, SETTLEMENT_POLL_MS);
+}
+
 async function refreshNotifications() {
   try {
-    const data = await api('?action=notifications');
-    updateNotifBadge(data.unreadCount);
-    renderNotificationsList(data.notifications || []);
+    await syncAppState({ announceNotifications: false });
   } catch {
     /* logged out or offline */
   }
@@ -114,8 +199,8 @@ async function openNotification(item) {
 
 function startNotificationPolling() {
   stopNotificationPolling();
-  refreshNotifications();
-  notifPollTimer = setInterval(refreshNotifications, 60000);
+  syncAppState({ announceNotifications: false }).catch(() => {});
+  notifPollTimer = setInterval(() => refreshNotifications(), 60000);
 }
 
 function stopNotificationPolling() {
@@ -222,13 +307,23 @@ function hideTypingIndicator() {
   document.getElementById('typingIndicator')?.remove();
 }
 
-function addBubble(text, role, { scroll = role === 'bot' } = {}) {
+function addBubble(text, role, { scroll = role === 'bot', actionUrl, actionLabel } = {}) {
   const row = document.createElement('div');
   row.className = `bubble-row ${role}`;
   const div = document.createElement('div');
   div.className = `bubble ${role}`;
   if (role === 'bot') {
     div.innerHTML = formatBotHtml(text);
+    if (actionUrl) {
+      div.appendChild(document.createElement('br'));
+      const link = document.createElement('a');
+      link.href = actionUrl;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.className = 'bubble-link';
+      link.textContent = actionLabel || 'Open link';
+      div.appendChild(link);
+    }
   } else {
     div.textContent = text;
   }
@@ -303,9 +398,13 @@ function showLogin() {
   document.documentElement.classList.remove('chat-active');
   document.body.classList.remove('chat-active');
   stopNotificationPolling();
+  stopSettlementPolling();
   messagesInner.innerHTML = '';
   quickRepliesEl.innerHTML = '';
   chatSessionState = null;
+  seenNotifIds = new Set();
+  seenMessageIds = new Set();
+  notifsSeeded = false;
   updateNotifBadge(0);
   walletStrip.classList.add('hidden');
   walletStrip.innerHTML = '';
@@ -335,6 +434,7 @@ function updateStatus(data) {
     statusBar.classList.add('hidden');
   }
   if (typeof data?.unreadCount === 'number') updateNotifBadge(data.unreadCount);
+  if (typeof data?.pendingCount === 'number') maybeStartSettlementPolling(data.pendingCount);
 }
 
 loginForm.addEventListener('submit', async (e) => {
@@ -419,6 +519,7 @@ async function sendMessage(text) {
     renderQuickReplies(data.quickReplies, data.session);
     updateStatus(data);
     if (typeof data.unreadCount === 'number') updateNotifBadge(data.unreadCount);
+    await syncAppState({ announceNotifications: true });
   } catch (err) {
     addBubble(userFacingClientError(err.message), 'bot', { scroll: true });
   } finally {
@@ -460,6 +561,7 @@ fileInput.addEventListener('change', async () => {
     renderQuickReplies(data.quickReplies, data.session);
     updateStatus(data);
     if (typeof data.unreadCount === 'number') updateNotifBadge(data.unreadCount);
+    await syncAppState({ announceNotifications: true });
   } catch (err) {
     addBubble(userFacingClientError(err.message) || 'Upload failed.', 'bot', { scroll: true });
   } finally {

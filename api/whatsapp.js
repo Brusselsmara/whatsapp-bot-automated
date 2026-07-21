@@ -55,7 +55,7 @@ function validateTwilioSignature(req, params) {
 
 module.exports = async (req, res) => {
   if (req.method === 'GET' || req.method === 'HEAD') {
-    return res.status(200).send('PayLink WhatsApp webhook OK');
+    return res.status(200).send('Romela Pula WhatsApp webhook OK');
   }
 
   if (req.method !== 'POST') {

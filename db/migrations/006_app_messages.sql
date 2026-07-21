@@ -1,4 +1,4 @@
--- Proactive PayLink PWA chat messages (PDF receipts, transfer declines, etc.).
+-- Proactive Romela Pula PWA chat messages (PDF receipts, transfer declines, etc.).
 -- Safe to run on existing databases.
 
 create table if not exists app_messages (

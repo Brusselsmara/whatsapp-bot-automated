@@ -93,7 +93,7 @@ module.exports = async (req, res) => {
         title: 'Verification not approved',
         body:
           'Unfortunately we could not verify your account. Your submitted documents did not meet our requirements. ' +
-          'Open the PayLink app and reply menu to start a new registration, or contact support if you believe this is an error.',
+          'Open the Romela Pula app and reply menu to start a new registration, or contact support if you believe this is an error.',
         actionUrl: getPublicAppUrl() ? `${getPublicAppUrl()}/` : null,
       });
     }
@@ -103,7 +103,7 @@ module.exports = async (req, res) => {
     return res.status(500).send(`
       <html><body style="font-family:sans-serif;padding:40px;max-width:500px;margin:auto">
         <h2 style="color:#dc2626">⚠️ Notification failed</h2>
-        <p>The account was updated to <strong>${newStatus}</strong>, but the PayLink app notification for
+        <p>The account was updated to <strong>${newStatus}</strong>, but the Romela Pula app notification for
         <strong>${submission.phone}</strong> could not be sent.</p>
         <p><strong>Error:</strong> ${err.message}</p>
         <p>Ensure <code>005_user_notifications.sql</code> has been run in Supabase, then try again or ask the customer to open the app after you re-send from admin.</p>
@@ -118,7 +118,7 @@ module.exports = async (req, res) => {
       <h2 style="color:${newStatus === 'approved' ? '#16a34a' : '#dc2626'}">
         ${newStatus === 'approved' ? '✅ Approved' : '❌ Rejected'}
       </h2>
-      <p><strong>${submission.phone}</strong> has been notified in the PayLink app.</p>
+      <p><strong>${submission.phone}</strong> has been notified in the Romela Pula app.</p>
       ${newStatus === 'approved'
         ? `<p>Their ${detected ? detected.currency + ' home-currency' : ''} wallet has been created.</p>`
         : ''}

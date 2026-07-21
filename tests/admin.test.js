@@ -39,7 +39,7 @@ describe('admin-metrics', () => {
       yc_fee_amount: 5,
       markup_amount: 12,
     });
-    expect(profit.paylinkProfit).toBe(12);
+    expect(profit.romelaPulaProfit).toBe(12);
     expect(profit.fxMargin).toBe(0);
   });
 
@@ -53,7 +53,7 @@ describe('admin-metrics', () => {
       yc_fee_amount: 8,
       markup_amount: 15,
     });
-    expect(profit.paylinkProfit).toBe(15);
+    expect(profit.romelaPulaProfit).toBe(15);
   });
 
   it('builds dashboard aggregates by currency', () => {
@@ -147,7 +147,7 @@ describe('admin-metrics', () => {
         currency: 'BWP',
         payoutAmount: null,
         payoutCurrency: 'BWP',
-        profit: { paylinkProfit: 10, markup: 10, fxMargin: 0, ycFee: 5 },
+        profit: { romelaPulaProfit: 10, markup: 10, fxMargin: 0, ycFee: 5 },
         reference: 'REF123',
       },
     ]);

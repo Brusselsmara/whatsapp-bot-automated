@@ -1,29 +1,29 @@
-const { getPaylinkFlatFeeBwp, computePaylinkServiceProfit } = require('../lib/fees');
+const { getRomelaPulaFlatFeeBwp, computeRomelaPulaServiceProfit } = require('../lib/fees');
 
-describe('getPaylinkFlatFeeBwp', () => {
+describe('getRomelaPulaFlatFeeBwp', () => {
   it('returns 5 for amounts up to 500 BWP', () => {
-    expect(getPaylinkFlatFeeBwp(100)).toBe(5);
-    expect(getPaylinkFlatFeeBwp(500)).toBe(5);
+    expect(getRomelaPulaFlatFeeBwp(100)).toBe(5);
+    expect(getRomelaPulaFlatFeeBwp(500)).toBe(5);
   });
 
   it('returns 15 for 501–2000 BWP', () => {
-    expect(getPaylinkFlatFeeBwp(501)).toBe(15);
-    expect(getPaylinkFlatFeeBwp(2000)).toBe(15);
+    expect(getRomelaPulaFlatFeeBwp(501)).toBe(15);
+    expect(getRomelaPulaFlatFeeBwp(2000)).toBe(15);
   });
 
   it('returns 50 for 25001–100000 BWP', () => {
-    expect(getPaylinkFlatFeeBwp(82600)).toBe(50);
-    expect(getPaylinkFlatFeeBwp(100000)).toBe(50);
+    expect(getRomelaPulaFlatFeeBwp(82600)).toBe(50);
+    expect(getRomelaPulaFlatFeeBwp(100000)).toBe(50);
   });
 
   it('returns 200 above 500000 BWP', () => {
-    expect(getPaylinkFlatFeeBwp(600000)).toBe(200);
+    expect(getRomelaPulaFlatFeeBwp(600000)).toBe(200);
   });
 });
 
-describe('computePaylinkServiceProfit', () => {
+describe('computeRomelaPulaServiceProfit', () => {
   it('sums flat fee and YC fee markup', () => {
-    const profit = computePaylinkServiceProfit({
+    const profit = computeRomelaPulaServiceProfit({
       flatFee: 50,
       ycFeeMarkup: 250,
       currency: 'ZAR',

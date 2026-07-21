@@ -7,7 +7,7 @@ const {
 describe('user-errors', () => {
   it('detects partner branding in error text', () => {
     expect(isPartnerLeak('Yellow Card API error (400): bad')).toBe(true);
-    expect(isPartnerLeak('PayLink is temporarily unavailable')).toBe(false);
+    expect(isPartnerLeak('Romela Pula is temporarily unavailable')).toBe(false);
   });
 
   it('userFacingErrorMessage hides partner errors', () => {

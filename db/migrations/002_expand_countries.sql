@@ -1,4 +1,4 @@
--- Expand PayLink to all Yellow Card Africa corridors (see lib/yellowcard.js COUNTRY_CONFIG).
+-- Expand Romela Pula to all Yellow Card Africa corridors (see lib/yellowcard.js COUNTRY_CONFIG).
 -- Safe to re-run.
 
 -- Invoice country (required for shared currencies like XOF / XAF)

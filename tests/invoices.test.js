@@ -22,7 +22,7 @@ const {
 describe('invoices', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    process.env.PUBLIC_APP_URL = 'https://paylink.example.com';
+    process.env.PUBLIC_APP_URL = 'https://romelapula.example.com';
   });
 
   it('normalizes invoice codes', () => {
@@ -32,7 +32,7 @@ describe('invoices', () => {
 
   it('builds payment URLs', () => {
     expect(buildInvoicePaymentUrl('INV-ABC123')).toBe(
-      'https://paylink.example.com/pay/INV-ABC123'
+      'https://romelapula.example.com/pay/INV-ABC123'
     );
   });
 

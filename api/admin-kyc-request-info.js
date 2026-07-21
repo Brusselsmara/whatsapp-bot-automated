@@ -1,7 +1,7 @@
 /**
  * Handles "Request More Info" clicks from the KYC review email.
  * Shows a simple HTML form where the admin can optionally add a note,
- * then sends a PayLink app notification asking for missing documents.
+ * then sends a Romela Pula app notification asking for missing documents.
  */
 
 const { supabase } = require('../lib/db');
@@ -46,7 +46,7 @@ module.exports = async (req, res) => {
     return res.status(200).send(`
       <html>
       <head>
-        <title>Request More Info — PayLink KYC</title>
+        <title>Request More Info — Romela Pula KYC</title>
         <style>
           body { font-family: sans-serif; padding: 40px; max-width: 560px; margin: auto; color: #1e293b; }
           h2 { border-bottom: 2px solid #e2e8f0; padding-bottom: 12px; }
@@ -76,7 +76,7 @@ module.exports = async (req, res) => {
         </div>
 
         <p>
-          A notification will be sent in the <strong>PayLink app</strong> for <strong>${phone}</strong> listing all required
+          A notification will be sent in the <strong>Romela Pula app</strong> for <strong>${phone}</strong> listing all required
           documents and your note below. The submission will remain in <em>pending</em> state
           so you can review again once they re-submit.
         </p>
@@ -89,14 +89,14 @@ module.exports = async (req, res) => {
           <textarea id="note" name="note" placeholder="e.g. Your proof of address is older than 3 months — please send a more recent one."></textarea>
           <p class="hint">Leave blank to send only the standard document checklist.</p>
 
-          <button type="submit">📤 Send request in PayLink app</button>
+          <button type="submit">📤 Send request in Romela Pula app</button>
         </form>
       </body>
       </html>
     `);
   }
 
-  // ── POST: process the form, send PayLink app notification ──────────────────
+  // ── POST: process the form, send Romela Pula app notification ──────────────────
   if (req.method === 'POST') {
     const { data: submission } = await supabase
       .from('kyc_submissions')
@@ -177,7 +177,7 @@ module.exports = async (req, res) => {
       return res.status(500).send(`
         <html><body style="font-family:sans-serif;padding:40px;max-width:500px;margin:auto">
           <h2 style="color:#dc2626">⚠️ Notification failed</h2>
-          <p>The database was updated but the PayLink app notification for <strong>${phone}</strong>
+          <p>The database was updated but the Romela Pula app notification for <strong>${phone}</strong>
           could not be sent. Error: ${err.message}</p>
         </body></html>
       `);
@@ -188,7 +188,7 @@ module.exports = async (req, res) => {
       <html>
       <body style="font-family:sans-serif;padding:40px;max-width:500px;margin:auto">
         <h2 style="color:#d97706">📋 More Info Requested</h2>
-        <p><strong>${name}</strong> (${phone}) has been notified in the PayLink app.</p>
+        <p><strong>${name}</strong> (${phone}) has been notified in the Romela Pula app.</p>
         <p>Their submission remains under review — once they re-send documents, 
         a new KYC email will arrive for you to action.</p>
         ${note ? `<p><strong>Your note sent:</strong><br><em>${note}</em></p>` : ''}

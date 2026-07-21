@@ -27,7 +27,7 @@ const sendBtn = chatForm?.querySelector('.send-btn');
 let otpToken = null;
 let pendingPhone = null;
 let pendingPayCode = null;
-const PAY_CODE_STORAGE_KEY = 'paylink_pending_invoice';
+const PAY_CODE_STORAGE_KEY = 'romela_pula_pending_invoice';
 let chatSessionState = null;
 let notifPollTimer = null;
 let settlementTimer = null;
@@ -307,7 +307,7 @@ function parsePayCodeFromUrl() {
   return queryCode ? queryCode.trim().toUpperCase() : null;
 }
 
-async function initPayLinkFromUrl() {
+async function initRomelaPulaFromUrl() {
   const code = parsePayCodeFromUrl();
   if (!code) return;
 
@@ -398,11 +398,11 @@ function showGateError(err) {
   showError(err.message);
   if (err.data?.code === 'PWA_NOT_ACTIVATED') {
     showActivationNotice(
-      'Step 1: Open WhatsApp and message PayLink. Step 2: Reply app. Step 3: Return here and tap Send code.'
+      'Step 1: Open WhatsApp and message Romela Pula. Step 2: Reply app. Step 3: Return here and tap Send code.'
     );
   } else if (err.data?.code === 'CSW_CLOSED') {
     showActivationNotice(
-      'Your 24-hour WhatsApp session expired. Message PayLink on WhatsApp again (reply app), then sign in here.'
+      'Your 24-hour WhatsApp session expired. Message Romela Pula on WhatsApp again (reply app), then sign in here.'
     );
   }
 }
@@ -420,7 +420,7 @@ function showTypingIndicator() {
   row.className = 'bubble-row bot';
   row.id = 'typingIndicator';
   row.innerHTML =
-    '<div class="typing-indicator" aria-label="PayLink is typing">' +
+    '<div class="typing-indicator" aria-label="Romela Pula is typing">' +
     '<span></span><span></span><span></span></div>';
   messagesInner.appendChild(row);
   scrollMessagesToEnd();
@@ -534,7 +534,7 @@ function showLogin() {
 }
 
 async function bootstrap() {
-  await initPayLinkFromUrl();
+  await initRomelaPulaFromUrl();
   try {
     const data = await api('?action=me');
     showChat();
@@ -542,7 +542,7 @@ async function bootstrap() {
     hidePayInvoiceBanner();
     const startedInvoice = await startPendingInvoicePay();
     if (!startedInvoice) {
-      addBubble('Welcome back to PayLink. Type "menu" to see options.', 'bot');
+      addBubble('Welcome back to Romela Pula. Type "menu" to see options.', 'bot');
     }
     focusComposer();
   } catch (err) {
@@ -556,7 +556,7 @@ function updateStatus(data) {
   updateWalletStrip(data);
   if (data?.user?.kycStatus === 'pending_review') {
     statusBar.textContent =
-      'Your registration is under review — we will notify you in the PayLink app, usually within 1 business day.';
+      'Your registration is under review — we will notify you in the Romela Pula app, usually within 1 business day.';
     statusBar.classList.remove('hidden');
   } else {
     statusBar.classList.add('hidden');
@@ -595,9 +595,9 @@ document.getElementById('phone').addEventListener('blur', async (e) => {
     if (data.pwaAccess?.canSendPwaOtp) {
       showActivationNotice('WhatsApp app access is active — you can request a login code.');
     } else if (!data.pwaAccess?.activated) {
-      showActivationNotice('Reply app on WhatsApp first to activate the PayLink web app.');
+      showActivationNotice('Reply app on WhatsApp first to activate the Romela Pula app.');
     } else if (!data.pwaAccess?.cswOpen) {
-      showActivationNotice('Message PayLink on WhatsApp again (reply app) to refresh your 24-hour access.');
+      showActivationNotice('Message Romela Pula on WhatsApp again (reply app) to refresh your 24-hour access.');
     }
   } catch {
     /* ignore lookup errors while typing */
@@ -624,7 +624,7 @@ verifyForm.addEventListener('submit', async (e) => {
     hidePayInvoiceBanner();
     const startedInvoice = await startPendingInvoicePay();
     if (!startedInvoice) {
-      addBubble('Welcome to PayLink 👋\n\nType "menu" or tap a quick reply to get started.', 'bot');
+      addBubble('Welcome to Romela Pula 👋\n\nType "menu" or tap a quick reply to get started.', 'bot');
     }
     focusComposer();
   } catch (err) {

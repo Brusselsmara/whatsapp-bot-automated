@@ -1,6 +1,6 @@
 const { buildFeeSchedulePdf } = require('../lib/pdf');
 
-// GET /api/fee-schedule — public PayLink fee schedule PDF (no PII).
+// GET /api/fee-schedule — public Romela Pula fee schedule PDF (no PII).
 module.exports = async (req, res) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     return res.status(405).send('Method not allowed');
@@ -13,7 +13,7 @@ module.exports = async (req, res) => {
   try {
     const pdfBuffer = await buildFeeSchedulePdf({ walletCurrency });
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'inline; filename="PayLink-Fee-Schedule.pdf"');
+    res.setHeader('Content-Disposition', 'inline; filename="Romela-Pula-Fee-Schedule.pdf"');
     res.setHeader('Cache-Control', 'public, max-age=86400');
     if (req.method === 'HEAD') {
       return res.status(200).end();

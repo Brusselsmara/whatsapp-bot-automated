@@ -1,4 +1,4 @@
-/** Generate simple solid PayLink PWA icons (no external deps). */
+/** Generate simple solid Romela Pula PWA icons (no external deps). */
 const fs = require('fs');
 const zlib = require('zlib');
 const path = require('path');

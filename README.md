@@ -1,6 +1,6 @@
-# PayLink — WhatsApp + Installable Web App
+# Romela Pula — WhatsApp + Installable Web App
 
-PayLink lets individuals and businesses register, verify their identity, fund an internal wallet, and send money or pay invoices to bank accounts and mobile money wallets across **19 African countries** (plus send-only corridors), per your **YC Addendum 1** fee schedule.
+Romela Pula lets individuals and businesses register, verify their identity, fund an internal wallet, and send money or pay invoices to bank accounts and mobile money wallets across **19 African countries** (plus send-only corridors), per your **YC Addendum 1** fee schedule.
 
 Customers can use **WhatsApp** (via Twilio) or the **installable web app (PWA)** at your Vercel URL — both share the same backend, wallet, and conversation logic.
 
@@ -55,7 +55,7 @@ Customer PWA (/) ──► /api/app.js ─────────────�
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET /` | PayLink PWA (installable web app) |
+| `GET /` | Romela Pula PWA (installable web app) |
 | `POST /api/app` | PWA API — login, chat messages, KYC uploads |
 | `POST /api/whatsapp` | Incoming Twilio WhatsApp messages (text + media) |
 | `GET/POST /api/admin` | Operator dashboard (money in/out, CSV export) |
@@ -152,11 +152,11 @@ Per YC Addendum §3 — bank disbursements only; no local wallet or top-up:
 | Colombia | COP | ✅ |
 | Mexico | MXN | ✅ |
 
-Cross-border sends from an African home wallet to LATAM use the same live `getFeeConfig` + PayLink markup model (tiered BWP flat + 1.5× YC fee). Fees are not hardcoded from the addendum.
+Cross-border sends from an African home wallet to LATAM use the same live `getFeeConfig` + Romela Pula markup model (tiered BWP flat + 1.5× YC fee). Fees are not hardcoded from the addendum.
 
 **Registration (19 African countries):** WhatsApp dial code must match a registerable corridor in the Africa table. **DR Congo**, **Ethiopia**, and **LATAM** are payout destinations only — no local wallet/top-up.
 
-**YC fees:** The addendum defines YC's B2B collection/disbursement fees per country. PayLink still quotes live fees via `getFeeConfig` and adds its own tiered markup on top.
+**YC fees:** The addendum defines YC's B2B collection/disbursement fees per country. Romela Pula still quotes live fees via `getFeeConfig` and adds its own tiered markup on top.
 
 **Not in addendum:** Namibia, Zimbabwe — still excluded.
 
@@ -171,7 +171,7 @@ Cross-border sends from an African home wallet to LATAM use the same live `getFe
 ### Welcome (unregistered / rejected users)
 
 ```
-Welcome to PayLink 👋
+Welcome to Romela Pula 👋
 1️⃣ Register
 2️⃣ Help
 ```
@@ -251,8 +251,8 @@ flowchart TD
 1. User record saved with `kyc_status = pending_review`
 2. Documents stored in `kyc_submissions` (Twilio media URLs or PWA refs `web:{uuid}`)
 3. Admin receives email (Resend) with attachments and three actions:
-   - **Approve** → `kyc_status = approved`, home-currency wallet created at 0, PayLink app notification with fee schedule link
-   - **Reject** → `kyc_status = rejected`, user notified in the PayLink app
+   - **Approve** → `kyc_status = approved`, home-currency wallet created at 0, Romela Pula app notification with fee schedule link
+   - **Reject** → `kyc_status = rejected`, user notified in the Romela Pula app
    - **Request More Info** → admin adds optional note, user gets an in-app notification to resubmit
 
 Until approved, only the welcome screen and help text are available — no payments.
@@ -261,14 +261,14 @@ Until approved, only the welcome screen and help text are available — no payme
 
 ## Workflow 2 — Top-up balance (fund user wallet)
 
-Top-up uses Yellow Card’s **receive** API. There's no currency choice — the bot already knows the user's home currency (derived from their WhatsApp number), so it goes straight to channel/amount. Before the top-up is submitted, the bot quotes Yellow Card's collection fee for that amount (`getFeeConfig` with `txType: receive`), adds PayLink's **BWP 10 flat fee** (converted to the wallet currency when needed) plus **20% markup on the YC fee** (customer pays **1.2×** YC collection fee in total), and tells the customer that fee will be deducted when the top-up completes. When YC confirms payment, the user's **one wallet** is credited the **net** amount (gross top-up minus fee).
+Top-up uses Yellow Card’s **receive** API. There's no currency choice — the bot already knows the user's home currency (derived from their WhatsApp number), so it goes straight to channel/amount. Before the top-up is submitted, the bot quotes Yellow Card's collection fee for that amount (`getFeeConfig` with `txType: receive`), adds Romela Pula's **BWP 10 flat fee** (converted to the wallet currency when needed) plus **20% markup on the YC fee** (customer pays **1.2×** YC collection fee in total), and tells the customer that fee will be deducted when the top-up completes. When YC confirms payment, the user's **one wallet** is credited the **net** amount (gross top-up minus fee).
 
 | Component | Calculation | Env var |
 |-----------|-------------|---------|
 | **Top-up fee** | BWP 10 flat + **1.2×** YC receive/collection fee | `TOPUP_FLAT_FEE_BWP` / `TOPUP_YC_FEE_MULTIPLIER` (default `10` / `1.2`) |
 | **Wallet credit** | `gross top-up − (yc_fee + markup)` on `RECEIVE.COMPLETE` | — |
 
-Example: a **9,000 BWP** momo top-up where YC's collection fee is **90 BWP** → PayLink markup **28 BWP** (10 flat + 18) → customer sees *"A top-up fee of 118.00 BWP will be deducted… 8,882.00 BWP will be added to your wallet"* → on success, **8,882 BWP** is credited.
+Example: a **9,000 BWP** momo top-up where YC's collection fee is **90 BWP** → Romela Pula markup **28 BWP** (10 flat + 18) → customer sees *"A top-up fee of 118.00 BWP will be deducted… 8,882.00 BWP will be added to your wallet"* → on success, **8,882 BWP** is credited.
 
 **Supabase:** re-run the `claim_topup_credit` function from `db/schema.sql` so wallet credits use the net amount after fees.
 
@@ -353,7 +353,7 @@ flowchart TD
     S --> T[YC submitSend + full KYC]
     T --> V[Transaction pending in DB]
     V --> W{YC completes?}
-    W -->|yes| X[PDF receipt via PayLink app notification]
+    W -->|yes| X[PDF receipt via Romela Pula app notification]
     W -->|failed| Y[Wallet refunded]
 ```
 
@@ -367,7 +367,7 @@ flowchart TD
 | 3b | Bank account number | Currency still asked manually (bank numbers carry no dial code) |
 | 4 | — | **Recipient identity resolved** (bank via Yellow Card; manual confirm for momo — see below). Bot shows the name and asks `1` Yes / `2` No before continuing. |
 | 5 | Amount | Computed in the **sender's wallet currency** |
-| 6 | — | Domestic → YC fee + tiered PayLink markup. Cross-border → user enters **total wallet debit (fees included)**; bot solves payout from YC destination-leg fee + tiered markup and bridged FX with 2% margin. |
+| 6 | — | Domestic → YC fee + tiered Romela Pula markup. Cross-border → user enters **total wallet debit (fees included)**; bot solves payout from YC destination-leg fee + tiered markup and bridged FX with 2% margin. |
 | 7 | `confirm` | Debits wallet; cross-border sends lock a fresh live quote right before `submitSend` |
 | 8 | — | User told payout is processing; receipt follows |
 
@@ -382,9 +382,9 @@ Before any amount is even asked, the bot resolves and confirms who the money is 
 
 ### Domestic sends (same currency in and out)
 
-No FX conversion — the recipient receives exactly the amount entered. The fee is Yellow Card's disbursement fee (`getFeeConfig`) plus PayLink's **tiered BWP flat fee** (converted to the send currency when needed) and **50% markup on the YC fee** — shown as a **single combined total**:
+No FX conversion — the recipient receives exactly the amount entered. The fee is Yellow Card's disbursement fee (`getFeeConfig`) plus Romela Pula's **tiered BWP flat fee** (converted to the send currency when needed) and **50% markup on the YC fee** — shown as a **single combined total**:
 
-| Transaction size (BWP equivalent) | PayLink flat fee |
+| Transaction size (BWP equivalent) | Romela Pula flat fee |
 |----------------------------------|------------------|
 | ≤ 500 | BWP 5 |
 | 501 – 2,000 | BWP 15 |
@@ -399,7 +399,7 @@ customerFee = ycFee + flatTierFee + (0.5 × ycFee)   // = flat + 1.5 × ycFee
 totalDebit  = amount + customerFee
 ```
 
-Example: 1,000 BWP domestic send with YC fee 10 BWP → PayLink flat **15 BWP** (tier 501–2,000) + YC markup **5 BWP** → customer fees **30 BWP** (10 + 15 + 5).
+Example: 1,000 BWP domestic send with YC fee 10 BWP → Romela Pula flat **15 BWP** (tier 501–2,000) + YC markup **5 BWP** → customer fees **30 BWP** (10 + 15 + 5).
 
 ### Cross-border sends (different currency in and out)
 
@@ -412,7 +412,7 @@ recipient gets ≈ principalFx × displayRate
 
 | Component | Calculation | Env var |
 |-----------|-------------|---------|
-| **Service fee** | Same tiered BWP flat + 1.5× YC disbursement fee as domestic (tier basis = FX principal in wallet currency, converted to BWP for tier lookup) | `PAYLINK_YC_FEE_MULTIPLIER` (default `1.5`) |
+| **Service fee** | Same tiered BWP flat + 1.5× YC disbursement fee as domestic (tier basis = FX principal in wallet currency, converted to BWP for tier lookup) | `ROMELA_PULA_YC_FEE_MULTIPLIER` (default `1.5`) |
 | **FX rate** | YC `/business/rates` bridged via USD, with **2%** margin shaved off (`displayRate = bridgedRate × 0.98`) | `CROSSBORDER_FX_MARGIN_PCT` |
 | **VIP FX margin** | 1% instead of 2%, for **business** accounts sending **BWP → South Africa (ZAR)** of at least **500,000 BWP** | `CROSSBORDER_VIP_FX_MARGIN_PCT` / `CROSSBORDER_VIP_MIN_AMOUNT_BWP` |
 
@@ -437,7 +437,7 @@ When Yellow Card marks the send **complete**:
 
 1. Transaction status → `completed`
 2. PDF receipt generated at `/api/receipt?id=<txn_uuid>`
-3. PayLink app notification with signed receipt link sent to payer
+3. Romela Pula app notification with signed receipt link sent to payer
 4. `receipt_sent` flag set (prevents duplicates)
 
 If send **fails** → wallet amount refunded, user notified.
@@ -457,7 +457,7 @@ The cron poller is what delivers the **PDF receipt automatically** when a payout
 
 ## Workflow 4 — Pay invoice (Business only)
 
-Invoice payments use the **same PayLink service-fee model** as sends (tiered BWP flat + 1.5× YC disbursement fee). The supplier always receives the invoice face value **in the invoice's own currency**; the payer's home-currency wallet is debited the total (face + fees + FX margin when cross-currency).
+Invoice payments use the **same Romela Pula service-fee model** as sends (tiered BWP flat + 1.5× YC disbursement fee). The supplier always receives the invoice face value **in the invoice's own currency**; the payer's home-currency wallet is debited the total (face + fees + FX margin when cross-currency).
 
 ### Fee formula (`lib/fees.js`)
 
@@ -465,19 +465,19 @@ Invoice payments use the **same PayLink service-fee model** as sends (tiered BWP
 |-----------|-------------|
 | **Supplier receives** | Invoice face value, in the invoice's own currency |
 | **Yellow Card disbursement fee** | Live `getFeeConfig` for send / recipient corridor |
-| **PayLink service fee** | Tiered BWP flat (see table above) + **0.5 × YC fee** (customer pays **1.5 × YC fee** total) |
-| **Invoice-currency charge** | Face value + YC fee + PayLink markup (`markup_amount` = flat + 0.5×YC) |
+| **Romela Pula service fee** | Tiered BWP flat (see table above) + **0.5 × YC fee** (customer pays **1.5 × YC fee** total) |
+| **Invoice-currency charge** | Face value + YC fee + Romela Pula markup (`markup_amount` = flat + 0.5×YC) |
 
-Configure via `.env`: `PAYLINK_YC_FEE_MULTIPLIER` (default `1.5`).
+Configure via `.env`: `ROMELA_PULA_YC_FEE_MULTIPLIER` (default `1.5`).
 
-### PayLink profit on a transaction
+### Romela Pula profit on a transaction
 
-PayLink gross profit has up to **three** components:
+Romela Pula gross profit has up to **three** components:
 
 | Component | Formula | Notes |
 |-----------|---------|-------|
 | **Flat tier fee** | Full BWP tier amount (converted to fee currency) | 100% profit — no pass-through |
-| **YC fee markup** | `0.5 × yc_fee_amount` | Customer pays 1.5× YC fee; YC keeps 1×, PayLink keeps 0.5× |
+| **YC fee markup** | `0.5 × yc_fee_amount` | Customer pays 1.5× YC fee; YC keeps 1×, Romela Pula keeps 0.5× |
 | **FX margin** | Cross-border only: `walletDebit − (face / bridgedRate) − serviceFeesWallet` | From 2% (or 1% VIP) shave on bridged rate; not stored separately — derive from txn fields |
 
 Stored on `transactions`: `yc_fee_amount` (pass-through to YC), `markup_amount` (flat + 0.5×YC in invoice/send currency). **Service profit** ≈ `markup_amount`. **Total profit** adds FX margin on cross-currency legs.
@@ -487,7 +487,7 @@ Example — **50,000 ZAR** invoice, **BWP** wallet, YC fee **250 ZAR**, bridged 
 - Tier: 25,001–100,000 → flat **50 BWP**
 - YC fee profit: **125 ZAR** (0.5 × 250)
 - FX margin: ≈ **2%** of bridged principal ≈ **~825 BWP**
-- **Total PayLink profit** ≈ **50 BWP + 125 ZAR + ~825 BWP** (convert ZAR leg at prevailing rate for a single-currency total)
+- **Total Romela Pula profit** ≈ **50 BWP + 125 ZAR + ~825 BWP** (convert ZAR leg at prevailing rate for a single-currency total)
 
 ### Cross-currency invoices — bridged to the payer's home wallet
 
@@ -614,7 +614,7 @@ Real phone numbers in sandbox may stay **pending** indefinitely. Production bank
    - Method: **POST**
 6. Set `PUBLIC_APP_URL` to your Vercel root URL (no `/api/whatsapp` suffix)
 
-### 2b. PayLink PWA
+### 2b. Romela Pula PWA
 
 1. Run `db/migrations/003_app_documents.sql`, `004_pwa_csw.sql`, and `005_user_notifications.sql` in Supabase
 2. Set `APP_SESSION_SECRET` in Vercel (long random string)
@@ -623,7 +623,7 @@ Real phone numbers in sandbox may stay **pending** indefinitely. Production bank
 
 **Customer activation (required — keeps Twilio inside WhatsApp CSW):**
 
-1. Customer messages your PayLink **WhatsApp number**
+1. Customer messages your Romela Pula **WhatsApp number**
 2. Customer replies **`app`** (also accepts `pwa`, `web`, `activate`)
 3. Bot sends the PWA link — this opens the **24-hour customer service window**
 4. Within 24 hours, customer opens the PWA, enters the same phone number, and receives the login code **on WhatsApp**
@@ -639,7 +639,7 @@ KYC approve/reject/more-info, receipts, top-up/settlement updates, and marketing
 
 - Bell icon + unread badge in the PWA header (polls every 60s)
 - Tap a notification to mark read and open links (e.g. receipt PDF, fee schedule)
-- KYC registration copy tells users they'll hear back **in the PayLink app**, not on WhatsApp
+- KYC registration copy tells users they'll hear back **in the Romela Pula app**, not on WhatsApp
 
 ### 3. Yellow Card
 
@@ -652,7 +652,7 @@ KYC approve/reject/more-info, receipts, top-up/settlement updates, and marketing
 ### 4. Resend (KYC emails)
 
 - `RESEND_API_KEY` from https://resend.com/api-keys
-- `RESEND_FROM_EMAIL` — `PayLink <onboarding@resend.dev>` works for testing
+- `RESEND_FROM_EMAIL` — `Romela Pula <onboarding@resend.dev>` works for testing
 - `ADMIN_EMAIL` — where review emails are sent
 
 ### 5. Deploy to Vercel
@@ -680,7 +680,7 @@ Or send header `x-cron-secret: <CRON_SECRET>` (no secret in URL).
 |---------------|--------|
 | Top-up not yet credited | Poll YC → credit wallet → WhatsApp confirmation |
 | Send / invoice payment still processing | Poll YC → mark complete or refund wallet |
-| Send completed but no PDF yet (`receipt_sent = false`) | Generate signed receipt URL → PayLink app notification with link |
+| Send completed but no PDF yet (`receipt_sent = false`) | Generate signed receipt URL → Romela Pula app notification with link |
 
 Without this cron, customers who initiate a send or invoice payment and then **do not message again** may not receive their PDF receipt until they return (webhooks and per-message polling only run when something else triggers the app).
 
@@ -706,7 +706,7 @@ See `.env.example` for the full list:
 | `APP_SESSION_SECRET` | PWA customer login + OTP signing |
 | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Database |
 | `YELLOWCARD_API_KEY` / `YELLOWCARD_SECRET_KEY` / `YELLOWCARD_BASE_URL` | Payments API + webhook HMAC |
-| `PAYLINK_YC_FEE_MULTIPLIER` | Service fee multiplier on YC disbursement fee — customer pays this × YC fee; PayLink keeps `(multiplier − 1) × YC fee` (default `1.5`) — applies to sends and invoice payments |
+| `ROMELA_PULA_YC_FEE_MULTIPLIER` | Service fee multiplier on YC disbursement fee — customer pays this × YC fee; Romela Pula keeps `(multiplier − 1) × YC fee` (default `1.5`) — applies to sends and invoice payments |
 | `FX_RATE_MULTIPLIER_BASE` / `QUOTE_LOCK_MINUTES` | Outbound quote margin/lock display |
 | `CROSSBORDER_FX_MARGIN_PCT` / `CROSSBORDER_VIP_FX_MARGIN_PCT` | Cross-border FX margin, standard vs VIP corridor (default `0.02` / `0.01`) — also used to bridge cross-currency invoice payments (Workflow 4) back to the payer's wallet |
 | `CROSSBORDER_VIP_MIN_AMOUNT_BWP` | Minimum BWP amount for the VIP FX margin (default `500000`) |
@@ -818,11 +818,11 @@ Run this matrix on **production Yellow Card** before go-live (not sandbox):
 ## Tech stack
 
 - **Runtime:** Node.js serverless functions on Vercel
-- **Messaging:** Twilio WhatsApp + PayLink PWA (`/`)
+- **Messaging:** Twilio WhatsApp + Romela Pula PWA (`/`)
 - **Database:** Supabase (PostgreSQL)
 - **Payments:** Yellow Card API (HMAC auth, live quotes, receive + send)
 - **FX quotes & send fees:** `lib/quotes.js` (domestic/cross-border send fee model for Workflow 3; shared bridging math reused by cross-currency invoice payments in Workflow 4; live-quote margin + expiry handling for Workflow 4's own settlement leg)
-- **Fees:** `lib/fees.js` (POBO + PayLink markup on invoices, Workflow 4)
+- **Fees:** `lib/fees.js` (POBO + Romela Pula markup on invoices, Workflow 4)
 - **Country detection:** `lib/yellowcard.js` (`detectCountryFromNumber` — dial-code lookup for momo auto-detection)
 - **Recipient identity resolution:** `lib/yellowcard.js` (`resolveBankAccount`, `isAccountNotFoundError`, `pickPreferredNetwork`) + `lib/conversation.js` (`resolveRecipientIdentity`, `formatRecipientConfirmMessage`) — the never-blindly-execute-a-payout confirmation gate for Workflows 3 & 4B
 - **Settlement:** `lib/settlement.js` (atomic Postgres RPCs)

@@ -47,9 +47,9 @@ describe('app-auth', () => {
 
   it('creates and reads session cookies', () => {
     const cookie = createAppSessionCookie('+26771234567');
-    expect(cookie).toContain('paylink_app=');
+    expect(cookie).toContain('romela_pula_app=');
     const token = decodeURIComponent(cookie.split('=')[1].split(';')[0]);
-    const req = { headers: { cookie: `paylink_app=${encodeURIComponent(token)}` } };
+    const req = { headers: { cookie: `romela_pula_app=${encodeURIComponent(token)}` } };
     expect(getPhoneFromSession(req)).toBe('+26771234567');
   });
 });

@@ -43,7 +43,7 @@ describe('notifications', () => {
     const row = await notifyUser('+26771234567', {
       type: 'kyc_approved',
       title: 'Account verified',
-      body: 'Welcome to PayLink',
+      body: 'Welcome to Romela Pula',
       actionUrl: 'https://example.com/fees',
     });
     expect(row.id).toBe('n1');

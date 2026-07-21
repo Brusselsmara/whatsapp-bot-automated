@@ -1,4 +1,4 @@
--- In-app notifications for the PayLink PWA (replaces proactive WhatsApp alerts).
+-- In-app notifications for the Romela Pula PWA (replaces proactive WhatsApp alerts).
 -- Safe to run on existing databases.
 
 create table if not exists user_notifications (

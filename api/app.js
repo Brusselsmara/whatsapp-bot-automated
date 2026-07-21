@@ -107,14 +107,14 @@ module.exports = async (req, res) => {
 async function handleGet(req, res) {
   const action = req.query.action || 'me';
   if (action === 'health') {
-    return json(res, 200, { ok: true, service: 'paylink-app' });
+    return json(res, 200, { ok: true, service: 'romela-pula-app' });
   }
 
   if (action === 'activation-status') {
     const queryPhone = normalizePhone(req.query.phone);
     if (!queryPhone) return json(res, 400, { error: 'phone query parameter required' });
     if (!yc.isSupportedWhatsAppNumber(queryPhone)) {
-      return json(res, 400, { error: 'PayLink is not available for this country code yet.' });
+      return json(res, 400, { error: 'Romela Pula is not available for this country code yet.' });
     }
     const pwaAccess = await getPwaAccessStatus(queryPhone);
     return json(res, 200, { phone: queryPhone, pwaAccess });
@@ -205,7 +205,7 @@ async function handleLogin(body, res) {
   const phone = normalizePhone(body.phone);
   if (!phone) return json(res, 400, { error: 'Enter a valid phone number with country code, e.g. +26771234567' });
   if (!yc.isSupportedWhatsAppNumber(phone)) {
-    return json(res, 400, { error: 'PayLink is not available for this country code yet.' });
+    return json(res, 400, { error: 'Romela Pula is not available for this country code yet.' });
   }
 
   try {

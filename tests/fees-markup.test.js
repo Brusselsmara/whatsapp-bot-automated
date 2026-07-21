@@ -6,8 +6,8 @@ jest.mock('../lib/yellowcard', () => ({
 const yc = require('../lib/yellowcard');
 const { mockGetRateForCurrency } = require('./helpers/mock-rates');
 const {
-  buildPaylinkServiceMarkup,
-  buildPaylinkTopupMarkup,
+  buildRomelaPulaServiceMarkup,
+  buildRomelaPulaTopupMarkup,
   buildInvoicePaymentQuote,
 } = require('../lib/fees');
 
@@ -15,9 +15,9 @@ beforeEach(() => {
   yc.getRateForCurrency.mockImplementation(mockGetRateForCurrency);
 });
 
-describe('buildPaylinkServiceMarkup', () => {
+describe('buildRomelaPulaServiceMarkup', () => {
   it('charges flat BWP tier + 0.5× YC fee in BWP', async () => {
-    const result = await buildPaylinkServiceMarkup({
+    const result = await buildRomelaPulaServiceMarkup({
       tierBasisAmount: 1000,
       tierBasisCurrency: 'BWP',
       feeCurrency: 'BWP',
@@ -32,7 +32,7 @@ describe('buildPaylinkServiceMarkup', () => {
   });
 
   it('converts flat tier from BWP to ZAR using USD bridge', async () => {
-    const result = await buildPaylinkServiceMarkup({
+    const result = await buildRomelaPulaServiceMarkup({
       tierBasisAmount: 100000,
       tierBasisCurrency: 'ZAR',
       feeCurrency: 'ZAR',
@@ -47,9 +47,9 @@ describe('buildPaylinkServiceMarkup', () => {
   });
 });
 
-describe('buildPaylinkTopupMarkup', () => {
+describe('buildRomelaPulaTopupMarkup', () => {
   it('charges BWP 10 flat + 0.2× YC collection fee', async () => {
-    const result = await buildPaylinkTopupMarkup({
+    const result = await buildRomelaPulaTopupMarkup({
       feeCurrency: 'BWP',
       ycFeeAmount: 90,
     });

@@ -64,7 +64,7 @@ create table if not exists kyc_submissions (
 );
 
 -- ============================================================
--- APP DOCUMENTS — KYC uploads from the PayLink PWA
+-- APP DOCUMENTS — KYC uploads from the Romela Pula PWA
 -- ============================================================
 create table if not exists app_documents (
   id uuid primary key default uuid_generate_v4(),
@@ -78,7 +78,7 @@ create table if not exists app_documents (
 create index if not exists app_documents_phone_idx on app_documents (phone);
 
 -- ============================================================
--- USER NOTIFICATIONS — PayLink PWA inbox (KYC, receipts, etc.)
+-- USER NOTIFICATIONS — Romela Pula PWA inbox (KYC, receipts, etc.)
 -- ============================================================
 create table if not exists user_notifications (
   id uuid primary key default uuid_generate_v4(),
@@ -98,7 +98,7 @@ create index if not exists user_notifications_unread_idx
   on user_notifications (phone) where read_at is null;
 
 -- ============================================================
--- APP MESSAGES — proactive PayLink PWA chat (receipts, declines)
+-- APP MESSAGES — proactive Romela Pula PWA chat (receipts, declines)
 -- ============================================================
 create table if not exists app_messages (
   id uuid primary key default uuid_generate_v4(),
@@ -467,8 +467,8 @@ begin
     p_amount,
     p_currency,
     'completed',
-    coalesce(nullif(trim(p_memo), ''), 'PayLink transfer'),
-    coalesce(v_recipient.business_name, v_recipient.kyc_name, 'PayLink user'),
+    coalesce(nullif(trim(p_memo), ''), 'Romela Pula transfer'),
+    coalesce(v_recipient.business_name, v_recipient.kyc_name, 'Romela Pula user'),
     p_recipient_phone,
     p_amount,
     p_currency,

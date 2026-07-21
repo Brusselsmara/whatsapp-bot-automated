@@ -6,14 +6,14 @@ jest.mock('../lib/db', () => ({
 }));
 
 const { supabase } = require('../lib/db');
-const { executeP2PTransfer, findPaylinkRecipient } = require('../lib/p2p');
+const { executeP2PTransfer, findRomelaPulaRecipient } = require('../lib/p2p');
 
 describe('p2p', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it('findPaylinkRecipient returns approved users only', async () => {
+  it('findRomelaPulaRecipient returns approved users only', async () => {
     supabase.from.mockReturnValue({
       select: jest.fn().mockReturnThis(),
       eq: jest.fn().mockReturnThis(),
@@ -28,7 +28,7 @@ describe('p2p', () => {
       }),
     });
 
-    const user = await findPaylinkRecipient('+26771111111');
+    const user = await findRomelaPulaRecipient('+26771111111');
     expect(user.phone).toBe('+26771111111');
   });
 

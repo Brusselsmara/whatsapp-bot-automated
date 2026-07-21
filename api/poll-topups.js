@@ -168,7 +168,7 @@ async function failTopup(txn, ycData) {
   await notifyUser(result.phone, {
     type: 'topup_failed',
     title: 'Top-up failed',
-    body: `Your top-up of ${result.amount} ${result.currency} could not be completed. Open the PayLink app and try again from the menu.`,
+    body: `Your top-up of ${result.amount} ${result.currency} could not be completed. Open the Romela Pula app and try again from the menu.`,
   });
   return 'failed';
 }

@@ -118,7 +118,7 @@ async function handleTopupUpdate(txn, status, event) {
     await notifyUser(result.phone, {
       type: 'topup_failed',
       title: 'Top-up failed',
-      body: `Your top-up of ${result.amount} ${result.currency} failed. Open the PayLink app and try again from the menu.`,
+      body: `Your top-up of ${result.amount} ${result.currency} failed. Open the Romela Pula app and try again from the menu.`,
     });
   } else {
     await supabase.from('transactions')

@@ -9,7 +9,7 @@ describe('fee schedule', () => {
     expect(buf.subarray(0, 4).toString()).toBe('%PDF');
   });
 
-  it('formatKycApprovalMessage mentions fee schedule and PayLink app', () => {
+  it('formatKycApprovalMessage mentions fee schedule and Romela Pula app', () => {
     const msg = formatKycApprovalMessage({ walletCurrency: 'BWP' });
     expect(msg).toMatch(/verified/i);
     expect(msg).toMatch(/fee schedule/i);
@@ -19,8 +19,8 @@ describe('fee schedule', () => {
   });
 
   it('buildFeeScheduleUrl points at fee-schedule API', () => {
-    process.env.PUBLIC_APP_URL = 'https://paylink.example.com';
-    expect(buildFeeScheduleUrl()).toBe('https://paylink.example.com/api/fee-schedule');
+    process.env.PUBLIC_APP_URL = 'https://romelapula.example.com';
+    expect(buildFeeScheduleUrl()).toBe('https://romelapula.example.com/api/fee-schedule');
     delete process.env.PUBLIC_APP_URL;
   });
 });

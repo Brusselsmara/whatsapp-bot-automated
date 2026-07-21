@@ -4,22 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#2d6a4f">
-  <meta name="description" content="PayLink — cross-border payments and invoice settlement">
-  <link rel="manifest" href="/manifest.webmanifest?v=8">
+  <meta name="description" content="Romela Pula — cross-border payments and invoice settlement">
+  <link rel="manifest" href="/manifest.webmanifest?v=9">
   <link rel="apple-touch-icon" href="/icons/icon-192.png">
-  <link rel="stylesheet" href="/styles.css?v=8">
-  <title>PayLink</title>
+  <link rel="stylesheet" href="/styles.css?v=9">
+  <title>Romela Pula</title>
 </head>
 <body>
   <div id="app">
     <section id="loginView" class="login-screen">
       <header class="login-brand">
-        <div class="wordmark">Pay<span>Link</span></div>
+        <div class="wordmark">Romela <span>Pula</span></div>
       </header>
       <div class="login-center">
         <div class="login-card">
           <h1>Sign in</h1>
-          <p class="lead">First, message PayLink on WhatsApp and reply <strong>app</strong> to activate. Then sign in here within 24 hours — your login code is sent on WhatsApp.</p>
+          <p class="lead">First, message Romela Pula on WhatsApp and reply <strong>app</strong> to activate. Then sign in here within 24 hours — your login code is sent on WhatsApp.</p>
           <div id="payInvoiceBanner" class="notice pay-invoice-banner hidden"></div>
           <div id="activationNotice" class="notice hidden"></div>
           <form id="loginForm">
@@ -42,9 +42,9 @@
     <section id="chatView" class="hidden chat-screen">
       <header class="chat-header">
         <div class="chat-header-left">
-          <div class="chat-avatar" aria-hidden="true">P</div>
+          <div class="chat-avatar" aria-hidden="true">R</div>
           <div class="chat-title">
-            <div class="name">PayLink Bot</div>
+            <div class="name">Romela Pula Bot</div>
             <div class="subtitle">Cross-border money assistant</div>
           </div>
         </div>
@@ -89,7 +89,7 @@
         <div id="quickReplies" class="quick-replies"></div>
         <form id="chatForm" class="composer">
           <label class="sr-only" for="message">Message</label>
-          <textarea id="message" name="message" rows="1" autocomplete="off" placeholder="Message PayLink…"></textarea>
+          <textarea id="message" name="message" rows="1" autocomplete="off" placeholder="Message Romela Pula…"></textarea>
           <label class="attach-btn" title="Upload document">
             <input id="fileInput" type="file" accept="image/*,.pdf" hidden>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -106,7 +106,7 @@
       </div>
     </section>
   </div>
-  <script src="/app.js?v=8" defer></script>
+  <script src="/app.js?v=9" defer></script>
   <script>
     if ('serviceWorker' in navigator) {
       let reloaded = false;
@@ -123,7 +123,7 @@
         }
       });
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js?v=8').catch(() => {});
+        navigator.serviceWorker.register('/sw.js?v=9').catch(() => {});
       });
     }
   </script>

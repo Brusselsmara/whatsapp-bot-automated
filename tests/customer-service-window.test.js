@@ -52,7 +52,7 @@ describe('customer-service-window', () => {
     const msg = await buildPwaActivationHintForApp('+26771234567', { kyc_status: 'unregistered' });
     expect(msg).toMatch(/activated from \*WhatsApp\*/i);
     expect(msg).toMatch(/reply \*app\*/i);
-    expect(msg).not.toMatch(/PayLink app activated/i);
+    expect(msg).not.toMatch(/Romela Pula app activated/i);
   });
 
   it('buildPwaActivationHintForApp tells registered users with expired CSW to refresh on WhatsApp', async () => {
@@ -72,7 +72,7 @@ describe('customer-service-window', () => {
     const msg = await buildPwaActivationHintForApp('+26771234567', { kyc_status: 'approved' });
     expect(msg).toMatch(/session has expired/i);
     expect(msg).toMatch(/reply \*app\*/i);
-    expect(msg).not.toMatch(/PayLink app activated/i);
+    expect(msg).not.toMatch(/Romela Pula app activated/i);
   });
 
   it('buildPwaActivationHintForApp tells active registered users they are already signed in', async () => {

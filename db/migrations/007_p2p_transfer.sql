@@ -1,4 +1,4 @@
--- Atomic PayLink-to-PayLink wallet transfer (same currency, KYC-approved users only).
+-- Atomic Romela Pula user-to-user wallet transfer (same currency, KYC-approved users only).
 
 create or replace function transfer_wallet_p2p(
   p_sender_phone text,
@@ -97,8 +97,8 @@ begin
     p_amount,
     p_currency,
     'completed',
-    coalesce(nullif(trim(p_memo), ''), 'PayLink transfer'),
-    coalesce(v_recipient.business_name, v_recipient.kyc_name, 'PayLink user'),
+    coalesce(nullif(trim(p_memo), ''), 'Romela Pula transfer'),
+    coalesce(v_recipient.business_name, v_recipient.kyc_name, 'Romela Pula user'),
     p_recipient_phone,
     p_amount,
     p_currency,

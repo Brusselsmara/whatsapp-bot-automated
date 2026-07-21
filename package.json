@@ -2,7 +2,7 @@
   "name": "whatsapp-payments-bot",
   "version": "1.0.0",
   "private": true,
-  "description": "PayLink — WhatsApp bot + installable web app for cross-border payments (BW/ZA/ZM and 19 corridors)",
+  "description": "Romela Pula — WhatsApp bot + installable web app for cross-border payments (BW/ZA/ZM and 19 corridors)",
   "scripts": {
     "dev": "vercel dev",
     "test": "jest",

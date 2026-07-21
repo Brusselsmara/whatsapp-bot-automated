@@ -13,6 +13,7 @@
  */
 const crypto = require('crypto');
 const { getPublicAppUrl, publicAppUrl } = require('../lib/app-url');
+const { proxiedFetch, assertProductionProxyIfRequired } = require('../lib/outbound-proxy');
 
 const BASE_URL = process.env.YELLOWCARD_BASE_URL;
 const API_KEY = process.env.YELLOWCARD_API_KEY;
@@ -43,6 +44,9 @@ function buildAuthHeaders(path, method, body) {
 }
 
 async function main() {
+  const isProd = !/sandbox\.api\.yellowcard\.io/i.test(BASE_URL);
+  assertProductionProxyIfRequired(isProd);
+
   const path = '/business/webhooks';
   const body = {
     url: publicAppUrl('/api/yellowcard-webhook'),
@@ -50,7 +54,7 @@ async function main() {
     active: true,
   };
 
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const res = await proxiedFetch(`${BASE_URL}${path}`, {
     method: 'POST',
     headers: buildAuthHeaders(path, 'POST', body),
     body: JSON.stringify(body),

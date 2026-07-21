@@ -15,7 +15,7 @@
   "functions": {
     "api/whatsapp.js":              { "maxDuration": 30 },
     "api/app.js":                   { "maxDuration": 30 },
-    "api/invoice.js":               { "maxDuration": 10 },
+    "api/outbound-ip.js":           { "maxDuration": 15 },
     "api/yellowcard-webhook.js":    { "maxDuration": 30 },
     "api/poll-topups.js":           { "maxDuration": 60 },
     "api/poll-transactions.js":     { "maxDuration": 60 },
